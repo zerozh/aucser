@@ -9,6 +9,8 @@
 ## Example
 
 ```go
+import "github.com/zerozh/aucser/core"
+
 conf := auccore.Config{
 	StartTime:    time.Now(),
 	HalfTime:     time.Now().Add(time.Second * 1800),
