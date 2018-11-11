@@ -5,9 +5,9 @@ import (
 	"math/rand"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
-	"sync/atomic"
 )
 
 func TestConcurrency(t *testing.T) {

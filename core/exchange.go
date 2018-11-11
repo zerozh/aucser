@@ -64,12 +64,12 @@ type Exchange struct {
 }
 
 type Config struct {
-	StartTime time.Time
-	HalfTime  time.Time
-	EndTime   time.Time
+	StartTime time.Time `json:"startTime"`
+	HalfTime  time.Time `json:"halfTime"`
+	EndTime   time.Time `json:"endTime"`
 
-	Capacity     int
-	WarningPrice int // warning price of first half, 0 for disable
+	Capacity     int `json:"capacity"`
+	WarningPrice int `json:"warningPrice"` // warning price of first half, 0 for disable
 }
 
 type State struct {
