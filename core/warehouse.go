@@ -118,20 +118,20 @@ func (d *PostgresWarehouse) Save(bid *Bid) error {
 	if err != nil {
 		d.log.Println("ERR:GetConn")
 		d.log.Println(err)
-		return Error{Code: 30, Message: "Save err"}
+		return Error{Code: CodeServerSaveError0, Message: "Save err"}
 	}
 
 	var ts string
 	if err := conn.QueryRowContext(ctx, "INSERT INTO "+d.getTableByClient(bid.Client)+" (client, price, sequence) VALUES ($1, $2, $3) RETURNING ts", bid.Client, bid.Price, bid.Sequence).Scan(&ts); err != nil {
 		d.log.Println("ERR:GetRow")
 		d.log.Println(err)
-		return Error{Code: 33, Message: "Save err"}
+		return Error{Code: CodeServerSaveError3, Message: "Save err"}
 	}
 
 	t, e := time.ParseInLocation("2006-01-02T15:04:05.999999999Z", ts, d.loc)
 	if e != nil {
 		d.log.Println(e)
-		return Error{Code: 34, Message: "Save err"}
+		return Error{Code: CodeServerSaveError4, Message: "Save err"}
 	}
 
 	// set process time
@@ -145,7 +145,7 @@ func (d *PostgresWarehouse) FinalSave(bid *Bid) error {
 	if e != nil {
 		d.log.Println("ERR:INSERT INTO")
 		d.log.Println(e)
-		return Error{Code: 500, Message: "FinalSave err"}
+		return Error{Code: CodeServerSaveError5, Message: "FinalSave err"}
 	}
 
 	return nil
@@ -260,34 +260,34 @@ func (d *MysqlWarehouse) Save(bid *Bid) error {
 	if err != nil {
 		d.log.Println("ERR:GetConn")
 		d.log.Println(err)
-		return Error{Code: 30, Message: "Save err"}
+		return Error{Code: CodeServerSaveError0, Message: "Save err"}
 	}
 
 	r, err := conn.ExecContext(ctx, "INSERT INTO "+d.getTableByClient(bid.Client)+" (client, price, sequence) VALUES (?, ?, ?)", bid.Client, bid.Price, bid.Sequence)
 	if err != nil {
 		d.log.Println("ERR:INSERT INTO")
 		d.log.Println(err)
-		return Error{Code: 31, Message: "Save err"}
+		return Error{Code: CodeServerSaveError1, Message: "Save err"}
 	}
 
 	l, err := r.LastInsertId()
 	if err != nil {
 		d.log.Println("ERR:LastInsertId")
 		d.log.Println(err)
-		return Error{Code: 32, Message: "Save err"}
+		return Error{Code: CodeServerSaveError2, Message: "Save err"}
 	}
 
 	var ts string
 	if err := conn.QueryRowContext(ctx, "SELECT ts FROM "+d.getTableByClient(bid.Client)+" WHERE id = ? LIMIT 1", l).Scan(&ts); err != nil {
 		d.log.Println("ERR:GetRow")
 		d.log.Println(err)
-		return Error{Code: 33, Message: "Save err"}
+		return Error{Code: CodeServerSaveError3, Message: "Save err"}
 	}
 
 	t, e := time.ParseInLocation("2006-01-02 15:04:05.000000", ts, d.loc)
 	if e != nil {
 		d.log.Println(e)
-		return Error{Code: 34, Message: "Save err"}
+		return Error{Code: CodeServerSaveError4, Message: "Save err"}
 	}
 
 	// set process time
@@ -301,7 +301,7 @@ func (d *MysqlWarehouse) FinalSave(bid *Bid) error {
 	if e != nil {
 		d.log.Println("ERR:INSERT INTO")
 		d.log.Println(e)
-		return Error{Code: 500, Message: "FinalSave err"}
+		return Error{Code: CodeServerSaveError5, Message: "FinalSave err"}
 	}
 
 	return nil

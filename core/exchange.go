@@ -259,7 +259,7 @@ func (e *Exchange) BidderStatus(client int) (*Bid, error) {
 		return bidder.Bids[len(bidder.Bids)-1], nil
 	}
 
-	return nil, Error{Code: 1, Message: "Not attend"}
+	return nil, Error{Code: CodeRequestNotAttend, Message: "Not attend"}
 }
 
 func (e *Exchange) Config() *Config {
@@ -366,14 +366,14 @@ func (e *Exchange) Bid(bid *Bid) error {
 
 func (e *Exchange) bid(bid *Bid) error {
 	if !bid.Time.IsZero() || bid.Sequence != 0 || bid.Active {
-		return Error{Code: 4, Message: "Invalid request"}
+		return Error{Code: CodeRequestInvalid, Message: "Invalid request"}
 	}
 
 	if !e.IsSession() {
 		if e.BeforeStart() {
-			return Error{Code: 1, Message: "Not ready"}
+			return Error{Code: CodeServerNotReady, Message: "Not ready"}
 		} else {
-			return Error{Code: 35, Message: "Invalid time"}
+			return Error{Code: CodeServerEnd, Message: "Invalid time"}
 		}
 	}
 
@@ -389,7 +389,7 @@ func (e *Exchange) bid(bid *Bid) error {
 
 func (e *Exchange) bidProcess(bid *Bid) error {
 	if bid.Price < 1 {
-		return Error{Code: 2, Message: "Invalid price"}
+		return Error{Code: CodeRequestInvalidPrice, Message: "Invalid price"}
 	}
 
 	bid.Active = true
@@ -401,7 +401,7 @@ func (e *Exchange) bidProcess(bid *Bid) error {
 		err = e.bidSession2(bid)
 	} else {
 		bid.Active = false
-		return Error{Code: 3, Message: "Invalid time"}
+		return Error{Code: CodeRequestInvalidTime, Message: "Invalid time"}
 	}
 
 	if err != nil {
@@ -418,11 +418,11 @@ func (e *Exchange) bidProcess(bid *Bid) error {
 
 func (e *Exchange) bidSession1(bid *Bid) error {
 	if b := e.st.GetBidderBlock(bid.Client); b != nil {
-		return Error{Code: 13, Message: "Attend first round"}
+		return Error{Code: CodeRequestAttendFirstRound, Message: "Attend first round"}
 	}
 
 	if e.c.WarningPrice > 0 && bid.Price > e.c.WarningPrice {
-		return Error{Code: 12, Message: "Greater than WarningPrice"}
+		return Error{Code: CodeRequestGTWarningPrice, Message: "Greater than WarningPrice"}
 	}
 
 	// save to warehouse
@@ -433,7 +433,7 @@ func (e *Exchange) bidSession1(bid *Bid) error {
 
 	// check db save time
 	if bid.Time.After(e.c.HalfTime) || bid.Time.Equal(e.c.HalfTime) {
-		return Error{Code: 14, Message: "End"}
+		return Error{Code: CodeRequestEnd1, Message: "End"}
 	}
 
 	// save to store
@@ -446,23 +446,23 @@ func (e *Exchange) bidSession1(bid *Bid) error {
 func (e *Exchange) bidSession2(bid *Bid) error {
 	bidder := e.st.GetBidderBlock(bid.Client)
 	if bidder == nil {
-		return Error{Code: 22, Message: "Not attend first round"}
+		return Error{Code: CodeRequestNotAttendFirstRound, Message: "Not attend first round"}
 	}
 
 	if bidder.Total >= BidsPerBidder {
-		return Error{Code: 23, Message: "Allin"}
+		return Error{Code: CodeRequestAllIn, Message: "Allin"}
 	}
 
 	// compare with previous bid
 	for _, preBid := range bidder.Bids {
 		if preBid.Price == bid.Price {
-			return Error{Code: 24, Message: "Same price"}
+			return Error{Code: CodeRequestSamePrice, Message: "Same price"}
 		}
 	}
 
 	// we should check price FIRST to avoid consumption above, but we have to qualify first
 	if bid.Price-e.lowestPrice > PricingDelta || e.lowestPrice-bid.Price > PricingDelta {
-		return Error{Code: 21, Message: "Out of Range"}
+		return Error{Code: CodeRequestOutOfRange, Message: "Out of Range"}
 	}
 
 	// save to warehouse
@@ -473,7 +473,7 @@ func (e *Exchange) bidSession2(bid *Bid) error {
 
 	// check db save time
 	if bid.Time.After(e.c.EndTime) || bid.Time.Equal(e.c.EndTime) {
-		return Error{Code: 25, Message: "End"}
+		return Error{Code: CodeRequestEnd2, Message: "End"}
 	}
 
 	// save to store
