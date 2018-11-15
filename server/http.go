@@ -26,9 +26,9 @@ func init() {
 	http.HandleFunc("/system/status", statusHandle)
 	http.HandleFunc("/system/boot", systemHandle)
 
-	go func() {
-		log.Fatal(http.ListenAndServe(":8080", nil))
-	}()
+	//go func() {
+	//	log.Fatal(http.ListenAndServe(":8080", nil))
+	//}()
 	//go func() {
 	//	log.Fatal(http.ListenAndServe(":6060", nil))
 	//}()

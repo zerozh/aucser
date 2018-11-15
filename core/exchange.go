@@ -24,10 +24,9 @@ const BidsPerBidder = 3
 type Exchange struct {
 	// exchange uuid
 	uuid string
-	// conf
-	c *Config
-	// runtime status, collect per second
-	r *State
+
+	config *Config
+	state  *State // runtime status, collect per second
 
 	// state
 	session  int // 0 before start, 1 first half, 2 second half, 3 end
@@ -48,8 +47,8 @@ type Exchange struct {
 	conLock         chan bool  // concurrency lock channel
 
 	// storage
-	st *Store
-	wh Warehouse
+	store     *Store
+	warehouse Warehouse
 
 	// util
 	sysLog *log.Logger
@@ -107,35 +106,35 @@ func NewExchange(conf Config) *Exchange {
 	resLogger := log.New(mw3, "", 0)
 
 	// init warehouse
-	var wh Warehouse
+	var warehouse Warehouse
 	if os.Getenv("DB_DRIVER") == "mysql" {
 		db, _ := sql.Open("mysql", os.Getenv("MYSQL_DSN"))
 		// default max connections of mysql is 151
 		db.SetMaxIdleConns(150)
 		db.SetMaxOpenConns(150)
-		wh = NewMysqlWarehouse("pp_"+pid+"_", db, sysLogger)
+		warehouse = NewMysqlWarehouse("pp_"+pid+"_", db, sysLogger)
 	} else if os.Getenv("DB_DRIVER") == "postgres" {
 		db, _ := sql.Open("postgres", os.Getenv("POSTGRES_DSN"))
 		// default max connections of postgres is 100
 		db.SetMaxIdleConns(99)
 		db.SetMaxOpenConns(99)
-		wh = NewPostgresWarehouse("pp_"+pid+"_", db, sysLogger)
+		warehouse = NewPostgresWarehouse("pp_"+pid+"_", db, sysLogger)
 	} else {
-		wh = NewMemoryWarehouse()
+		warehouse = NewMemoryWarehouse()
 	}
-	wh.Initialize()
+	warehouse.Initialize()
 
 	loc, _ := time.LoadLocation("Asia/Shanghai")
 
 	return &Exchange{
-		uuid:   pid,
-		c:      &conf,
-		sysLog: sysLogger,
-		bidLog: bidLogger,
-		resLog: resLogger,
-		loc:    loc,
-		wh:     wh,
-		st:     NewStore(conf.Capacity),
+		uuid:      pid,
+		config:    &conf,
+		sysLog:    sysLogger,
+		bidLog:    bidLogger,
+		resLog:    resLogger,
+		loc:       loc,
+		warehouse: warehouse,
+		store:     NewStore(conf.Capacity),
 	}
 }
 
@@ -144,9 +143,9 @@ func (e *Exchange) Serve() {
 	e.session = 0
 
 	e.lowestPrice = 1
-	e.lowestTime = e.c.StartTime
+	e.lowestTime = e.config.StartTime
 
-	e.r = &State{}
+	e.state = &State{}
 	e.collectStat()
 
 	// runtime state
@@ -156,12 +155,12 @@ func (e *Exchange) Serve() {
 	// add clock
 	now := time.Now()
 	tStartDuration := time.Duration(0)
-	if now.Before(e.c.StartTime) {
-		tStartDuration = e.c.StartTime.Sub(now)
+	if now.Before(e.config.StartTime) {
+		tStartDuration = e.config.StartTime.Sub(now)
 	}
 	e.startTimer = time.AfterFunc(tStartDuration, e.toggleStart)
-	e.halfTimer = time.AfterFunc(e.c.HalfTime.Sub(now), e.toggleHalf)
-	e.endTimer = time.AfterFunc(e.c.EndTime.Sub(now), e.toggleEnd)
+	e.halfTimer = time.AfterFunc(e.config.HalfTime.Sub(now), e.toggleHalf)
+	e.endTimer = time.AfterFunc(e.config.EndTime.Sub(now), e.toggleEnd)
 
 	// init counter
 	e.counterReq = newCounter()
@@ -200,8 +199,8 @@ func (e *Exchange) stopTimer() {
 }
 
 func (e *Exchange) releaseResource() {
-	if e.wh != nil {
-		e.wh.Terminate()
+	if e.warehouse != nil {
+		e.warehouse.Terminate()
 	}
 }
 
@@ -219,12 +218,12 @@ func (e *Exchange) Verify() {
 	e.verified++
 
 	whStore := NewStore(0)
-	e.wh.DumpToStore(whStore, e.c)
-	if !e.st.Equal(whStore) {
+	e.warehouse.Restore(whStore, e.config)
+	if !e.store.Equal(whStore) {
 		// ERROR
 	}
 
-	whStore.SetCapacity(e.c.Capacity)
+	whStore.SetCapacity(e.config.Capacity)
 	whStore.SortAllBlocks()
 
 	// export final result
@@ -254,7 +253,7 @@ func (e *Exchange) Verify() {
 }
 
 func (e *Exchange) BidderStatus(client int) (*Bid, error) {
-	bidder := e.st.GetBidderBlock(client)
+	bidder := e.store.GetBidderBlock(client)
 	if bidder != nil {
 		return bidder.Bids[len(bidder.Bids)-1], nil
 	}
@@ -263,19 +262,19 @@ func (e *Exchange) BidderStatus(client int) (*Bid, error) {
 }
 
 func (e *Exchange) Config() *Config {
-	return e.c
+	return e.config
 }
 
 func (e *Exchange) State() *State {
-	return e.r
+	return e.state
 }
 
 func (e *Exchange) BiddersCount() int {
-	return e.st.CountBidders()
+	return e.store.CountBidders()
 }
 
 func (e *Exchange) BidsCount() int {
-	return e.st.CountBids()
+	return e.store.CountBids()
 }
 
 func (e *Exchange) BeforeStart() bool {
@@ -410,41 +409,41 @@ func (e *Exchange) bidProcess(bid *Bid) error {
 	}
 
 	// bid success, update LowestTenderableBid
-	e.lowestPrice = e.st.LowestTenderableBid.Price
-	e.lowestTime = e.st.LowestTenderableBid.Time
+	e.lowestPrice = e.store.LowestTenderableBid.Price
+	e.lowestTime = e.store.LowestTenderableBid.Time
 
 	return nil
 }
 
 func (e *Exchange) bidSession1(bid *Bid) error {
-	if b := e.st.GetBidderBlock(bid.Client); b != nil {
+	if b := e.store.GetBidderBlock(bid.Client); b != nil {
 		return Error{Code: CodeRequestAttendFirstRound, Message: "Attend first round"}
 	}
 
-	if e.c.WarningPrice > 0 && bid.Price > e.c.WarningPrice {
+	if e.config.WarningPrice > 0 && bid.Price > e.config.WarningPrice {
 		return Error{Code: CodeRequestGTWarningPrice, Message: "Greater than WarningPrice"}
 	}
 
 	// save to warehouse
 	bid.Sequence = 1
-	if err := e.wh.Save(bid); err != nil {
+	if err := e.warehouse.Add(bid); err != nil {
 		return err
 	}
 
 	// check db save time
-	if bid.Time.After(e.c.HalfTime) || bid.Time.Equal(e.c.HalfTime) {
+	if bid.Time.After(e.config.HalfTime) || bid.Time.Equal(e.config.HalfTime) {
 		return Error{Code: CodeRequestEnd1, Message: "End"}
 	}
 
 	// save to store
-	e.st.Add(bid)
+	e.store.Add(bid)
 	atomic.AddUint64(&e.counterProcess, 1)
 
 	return nil
 }
 
 func (e *Exchange) bidSession2(bid *Bid) error {
-	bidder := e.st.GetBidderBlock(bid.Client)
+	bidder := e.store.GetBidderBlock(bid.Client)
 	if bidder == nil {
 		return Error{Code: CodeRequestNotAttendFirstRound, Message: "Not attend first round"}
 	}
@@ -467,17 +466,17 @@ func (e *Exchange) bidSession2(bid *Bid) error {
 
 	// save to warehouse
 	bid.Sequence = int(bidder.Total) + 1
-	if err := e.wh.Save(bid); err != nil {
+	if err := e.warehouse.Add(bid); err != nil {
 		return err
 	}
 
 	// check db save time
-	if bid.Time.After(e.c.EndTime) || bid.Time.Equal(e.c.EndTime) {
+	if bid.Time.After(e.config.EndTime) || bid.Time.Equal(e.config.EndTime) {
 		return Error{Code: CodeRequestEnd2, Message: "End"}
 	}
 
 	// save to store
-	e.st.Add(bid)
+	e.store.Add(bid)
 	atomic.AddUint64(&e.counterProcess, 1)
 
 	return nil
@@ -507,32 +506,32 @@ func (e *Exchange) collectStat() {
 		e.collectCountBidders()
 	}
 
-	e.r.Time = time.Now()
-	e.r.Session = e.session
-	e.r.Bidders = e.bidders
-	e.r.LowestPrice = e.lowestPrice
-	e.r.LowestTime = e.lowestTime
+	e.state.Time = time.Now()
+	e.state.Session = e.session
+	e.state.Bidders = e.bidders
+	e.state.LowestPrice = e.lowestPrice
+	e.state.LowestTime = e.lowestTime
 
-	e.sysLog.Printf("%s %3.0f %4d @ %s, B %6d, O %6d, G %6d, H %6d, P %6d\n", time.Now().Format("15:04:05.000000"), e.c.EndTime.Sub(time.Now()).Seconds(), e.r.LowestPrice, e.r.LowestTime.Format("15:04:05"), e.r.Bidders, e.BidsCount(), runtime.NumGoroutine(), atomic.SwapUint64(&e.counterHit, 0), atomic.SwapUint64(&e.counterProcess, 0))
+	e.sysLog.Printf("%s %3.0f %4d @ %s, B %6d, O %6d, G %6d, H %6d, P %6d\n", time.Now().Format("15:04:05.000000"), e.config.EndTime.Sub(time.Now()).Seconds(), e.state.LowestPrice, e.state.LowestTime.Format("15:04:05"), e.state.Bidders, e.BidsCount(), runtime.NumGoroutine(), atomic.SwapUint64(&e.counterHit, 0), atomic.SwapUint64(&e.counterProcess, 0))
 }
 
 func (e *Exchange) collectCountBidders() {
-	e.bidders = e.st.CountBidders()
+	e.bidders = e.store.CountBidders()
 }
 
 // Dump save all final result to log
 func (e *Exchange) Dump() {
-	DumpAll(e.resLog, e.st)
+	DumpAll(e.resLog, e.store)
 }
 
 // Output save final tender to storage
 func (e *Exchange) Output() {
 	success := 0
-	for _, key := range e.st.PriceChain.Index {
-		b := e.st.PriceChain.Blocks[key]
+	for _, key := range e.store.PriceChain.Index {
+		b := e.store.PriceChain.Blocks[key]
 		for _, bid := range b.Bids {
-			if success < e.st.Capacity && bid.Active {
-				e.wh.FinalSave(bid)
+			if success < e.store.Capacity && bid.Active {
+				e.warehouse.Commit(bid)
 				success++
 			}
 		}

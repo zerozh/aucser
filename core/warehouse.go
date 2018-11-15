@@ -20,45 +20,45 @@ const TableShards = 8 // sharding table, 2^N, N>=0
 type Warehouse interface {
 	Initialize()
 	Terminate()
-	Save(bid *Bid) error
-	FinalSave(bid *Bid) error
-	DumpToStore(store *Store, c *Config)
+	Add(bid *Bid) error              // Add data to log warehouse
+	Commit(bid *Bid) error           // Add data to result warehouse
+	Restore(store *Store, c *Config) // Restore data from log warehouse to Store
 }
 
 // MemoryWarehouse store data in memory, for debug and high concurrency test
 // MySQL and Postgres are hardly handle more than 10k TPS
 type MemoryWarehouse struct {
-	store *Store
-	sim   *ConcurrencySimulator
+	store     *Store
+	simulator *ConcurrencySimulator
 }
 
 func NewMemoryWarehouse() *MemoryWarehouse {
 	return &MemoryWarehouse{}
 }
 
-func (d *MemoryWarehouse) Initialize() {
-	d.store = NewStore(0)
-	d.sim = NewConcurrencySimulator(11000 + rand.Intn(2000))
+func (w *MemoryWarehouse) Initialize() {
+	w.store = NewStore(0)
+	w.simulator = NewConcurrencySimulator(11000 + rand.Intn(2000))
 }
 
-func (d *MemoryWarehouse) Terminate() {
+func (w *MemoryWarehouse) Terminate() {
 }
 
-func (d *MemoryWarehouse) Save(bid *Bid) error {
-	d.sim.Run()
+func (w *MemoryWarehouse) Add(bid *Bid) error {
+	w.simulator.Run()
 
 	bid.Time = time.Now()
-	d.store.Add(bid)
+	w.store.Add(bid)
 
 	return nil
 }
 
-func (d *MemoryWarehouse) FinalSave(bid *Bid) error {
+func (w *MemoryWarehouse) Commit(bid *Bid) error {
 	return nil
 }
 
-func (d *MemoryWarehouse) DumpToStore(store *Store, c *Config) {
-	*store = *d.store
+func (w *MemoryWarehouse) Restore(store *Store, c *Config) {
+	*store = *w.store
 }
 
 type PostgresWarehouse struct {
@@ -77,61 +77,61 @@ func NewPostgresWarehouse(table string, db *sql.DB, logger *log.Logger) *Postgre
 	}
 }
 
-func (d *PostgresWarehouse) Initialize() {
-	d.once.Do(func() {
-		d.loc, _ = time.LoadLocation("Asia/Shanghai")
+func (w *PostgresWarehouse) Initialize() {
+	w.once.Do(func() {
+		w.loc, _ = time.LoadLocation("Asia/Shanghai")
 		for i := 0; i < TableShards; i++ {
-			_, err := d.db.Exec(fmt.Sprintf(`CREATE TABLE %s (
+			_, err := w.db.Exec(fmt.Sprintf(`CREATE TABLE %s (
 			id BIGSERIAL PRIMARY KEY,
     		client INT,
     		price INT,
     		sequence SMALLINT,
-    		ts TIMESTAMP(6) DEFAULT now());`, d.table+fmt.Sprintf("%04d", i)))
+    		ts TIMESTAMP(6) DEFAULT now());`, w.table+fmt.Sprintf("%04d", i)))
 
 			if err != nil {
-				d.log.Panicln(err)
+				w.log.Panicln(err)
 			}
 		}
 
-		_, err := d.db.Exec(fmt.Sprintf(`CREATE TABLE %s (
+		_, err := w.db.Exec(fmt.Sprintf(`CREATE TABLE %s (
 			id BIGSERIAL PRIMARY KEY,
     		client INT,
     		price INT,
     		sequence SMALLINT,
-    		ts TIMESTAMP(6) DEFAULT now());`, d.getTableResult()))
+    		ts TIMESTAMP(6) DEFAULT now());`, w.getTableResult()))
 
 		if err != nil {
-			d.log.Panicln(err)
+			w.log.Panicln(err)
 		}
 	})
 }
 
-func (d *PostgresWarehouse) Terminate() {
-	d.db.Close()
+func (w *PostgresWarehouse) Terminate() {
+	w.db.Close()
 }
 
-func (d *PostgresWarehouse) Save(bid *Bid) error {
+func (w *PostgresWarehouse) Add(bid *Bid) error {
 	ctx := context.Background()
-	conn, err := d.db.Conn(ctx)
+	conn, err := w.db.Conn(ctx)
 	defer conn.Close()
 
 	if err != nil {
-		d.log.Println("ERR:GetConn")
-		d.log.Println(err)
-		return Error{Code: CodeServerSaveError0, Message: "Save err"}
+		w.log.Println("ERR:GetConn")
+		w.log.Println(err)
+		return Error{Code: CodeServerSaveError0, Message: "Add err"}
 	}
 
 	var ts string
-	if err := conn.QueryRowContext(ctx, "INSERT INTO "+d.getTableByClient(bid.Client)+" (client, price, sequence) VALUES ($1, $2, $3) RETURNING ts", bid.Client, bid.Price, bid.Sequence).Scan(&ts); err != nil {
-		d.log.Println("ERR:GetRow")
-		d.log.Println(err)
-		return Error{Code: CodeServerSaveError3, Message: "Save err"}
+	if err := conn.QueryRowContext(ctx, "INSERT INTO "+w.getTableByClient(bid.Client)+" (client, price, sequence) VALUES ($1, $2, $3) RETURNING ts", bid.Client, bid.Price, bid.Sequence).Scan(&ts); err != nil {
+		w.log.Println("ERR:GetRow")
+		w.log.Println(err)
+		return Error{Code: CodeServerSaveError3, Message: "Add err"}
 	}
 
-	t, e := time.ParseInLocation("2006-01-02T15:04:05.999999999Z", ts, d.loc)
+	t, e := time.ParseInLocation("2006-01-02T15:04:05.999999999Z", ts, w.loc)
 	if e != nil {
-		d.log.Println(e)
-		return Error{Code: CodeServerSaveError4, Message: "Save err"}
+		w.log.Println(e)
+		return Error{Code: CodeServerSaveError4, Message: "Add err"}
 	}
 
 	// set process time
@@ -140,25 +140,25 @@ func (d *PostgresWarehouse) Save(bid *Bid) error {
 	return nil
 }
 
-func (d *PostgresWarehouse) FinalSave(bid *Bid) error {
-	_, e := d.db.Exec("INSERT INTO "+d.getTableResult()+" (client, price, sequence, ts) VALUES ($1, $2, $3, $4)", bid.Client, bid.Price, bid.Sequence, bid.Time.Format("2006-01-02 15:04:05.000000"))
+func (w *PostgresWarehouse) Commit(bid *Bid) error {
+	_, e := w.db.Exec("INSERT INTO "+w.getTableResult()+" (client, price, sequence, ts) VALUES ($1, $2, $3, $4)", bid.Client, bid.Price, bid.Sequence, bid.Time.Format("2006-01-02 15:04:05.000000"))
 	if e != nil {
-		d.log.Println("ERR:INSERT INTO")
-		d.log.Println(e)
-		return Error{Code: CodeServerSaveError5, Message: "FinalSave err"}
+		w.log.Println("ERR:INSERT INTO")
+		w.log.Println(e)
+		return Error{Code: CodeServerSaveError5, Message: "Commit err"}
 	}
 
 	return nil
 }
 
-func (d *PostgresWarehouse) DumpToStore(store *Store, c *Config) {
+func (w *PostgresWarehouse) Restore(store *Store, c *Config) {
 	pageSize := 1000
 
 	for t := 0; t < TableShards; t++ {
 		id := 0
 		for {
 			curI := 0
-			rows, err := d.db.Query("SELECT id,client,price,sequence,ts FROM "+d.table+fmt.Sprintf("%04d", t)+" WHERE id > $1 ORDER BY id ASC LIMIT "+strconv.Itoa(pageSize), id)
+			rows, err := w.db.Query("SELECT id,client,price,sequence,ts FROM "+w.table+fmt.Sprintf("%04d", t)+" WHERE id > $1 ORDER BY id ASC LIMIT "+strconv.Itoa(pageSize), id)
 			for rows.Next() {
 				bid := &Bid{Active: true}
 				var ts string
@@ -166,7 +166,7 @@ func (d *PostgresWarehouse) DumpToStore(store *Store, c *Config) {
 				if err != nil {
 					log.Fatal(err)
 				}
-				t, e := time.ParseInLocation("2006-01-02T15:04:05.999999999Z", ts, d.loc)
+				t, e := time.ParseInLocation("2006-01-02T15:04:05.999999999Z", ts, w.loc)
 				if e != nil {
 					log.Fatal(err)
 				}
@@ -193,12 +193,12 @@ func (d *PostgresWarehouse) DumpToStore(store *Store, c *Config) {
 	}
 }
 
-func (d *PostgresWarehouse) getTableByClient(client int) string {
-	return d.table + fmt.Sprintf("%04d", client&(TableShards-1))
+func (w *PostgresWarehouse) getTableByClient(client int) string {
+	return w.table + fmt.Sprintf("%04d", client&(TableShards-1))
 }
 
-func (d *PostgresWarehouse) getTableResult() string {
-	return d.table + "f"
+func (w *PostgresWarehouse) getTableResult() string {
+	return w.table + "f"
 }
 
 type MysqlWarehouse struct {
@@ -217,77 +217,77 @@ func NewMysqlWarehouse(table string, db *sql.DB, logger *log.Logger) *MysqlWareh
 	}
 }
 
-func (d *MysqlWarehouse) Initialize() {
-	d.once.Do(func() {
-		d.loc, _ = time.LoadLocation("Asia/Shanghai")
+func (w *MysqlWarehouse) Initialize() {
+	w.once.Do(func() {
+		w.loc, _ = time.LoadLocation("Asia/Shanghai")
 		for i := 0; i < TableShards; i++ {
-			_, err := d.db.Exec(fmt.Sprintf(`CREATE TABLE %s (
+			_, err := w.db.Exec(fmt.Sprintf(`CREATE TABLE %s (
 			id INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
 			client INT(10) UNSIGNED NOT NULL,
 			price INT(10) UNSIGNED NOT NULL,
 			sequence TINYINT(3) UNSIGNED NOT NULL,
 			ts TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP(6),
-			PRIMARY KEY (id)) ENGINE = MyISAM;`, d.table+fmt.Sprintf("%04d", i)))
+			PRIMARY KEY (id)) ENGINE = MyISAM;`, w.table+fmt.Sprintf("%04d", i)))
 
 			if err != nil {
-				d.log.Panicln(err)
+				w.log.Panicln(err)
 			}
 		}
 
-		_, err := d.db.Exec(fmt.Sprintf(`CREATE TABLE %s (
+		_, err := w.db.Exec(fmt.Sprintf(`CREATE TABLE %s (
 			id INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
 			client INT(10) UNSIGNED NOT NULL,
 			price INT(10) UNSIGNED NOT NULL,
 			sequence TINYINT(3) UNSIGNED NOT NULL,
 			ts TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP(6),
-			PRIMARY KEY (id)) ENGINE = MyISAM;`, d.getTableResult()))
+			PRIMARY KEY (id)) ENGINE = MyISAM;`, w.getTableResult()))
 
 		if err != nil {
-			d.log.Panicln(err)
+			w.log.Panicln(err)
 		}
 	})
 }
 
-func (d *MysqlWarehouse) Terminate() {
-	d.db.Close()
+func (w *MysqlWarehouse) Terminate() {
+	w.db.Close()
 }
 
-func (d *MysqlWarehouse) Save(bid *Bid) error {
+func (w *MysqlWarehouse) Add(bid *Bid) error {
 	ctx := context.Background()
-	conn, err := d.db.Conn(ctx)
+	conn, err := w.db.Conn(ctx)
 	defer conn.Close()
 
 	if err != nil {
-		d.log.Println("ERR:GetConn")
-		d.log.Println(err)
-		return Error{Code: CodeServerSaveError0, Message: "Save err"}
+		w.log.Println("ERR:GetConn")
+		w.log.Println(err)
+		return Error{Code: CodeServerSaveError0, Message: "Add err"}
 	}
 
-	r, err := conn.ExecContext(ctx, "INSERT INTO "+d.getTableByClient(bid.Client)+" (client, price, sequence) VALUES (?, ?, ?)", bid.Client, bid.Price, bid.Sequence)
+	r, err := conn.ExecContext(ctx, "INSERT INTO "+w.getTableByClient(bid.Client)+" (client, price, sequence) VALUES (?, ?, ?)", bid.Client, bid.Price, bid.Sequence)
 	if err != nil {
-		d.log.Println("ERR:INSERT INTO")
-		d.log.Println(err)
-		return Error{Code: CodeServerSaveError1, Message: "Save err"}
+		w.log.Println("ERR:INSERT INTO")
+		w.log.Println(err)
+		return Error{Code: CodeServerSaveError1, Message: "Add err"}
 	}
 
 	l, err := r.LastInsertId()
 	if err != nil {
-		d.log.Println("ERR:LastInsertId")
-		d.log.Println(err)
-		return Error{Code: CodeServerSaveError2, Message: "Save err"}
+		w.log.Println("ERR:LastInsertId")
+		w.log.Println(err)
+		return Error{Code: CodeServerSaveError2, Message: "Add err"}
 	}
 
 	var ts string
-	if err := conn.QueryRowContext(ctx, "SELECT ts FROM "+d.getTableByClient(bid.Client)+" WHERE id = ? LIMIT 1", l).Scan(&ts); err != nil {
-		d.log.Println("ERR:GetRow")
-		d.log.Println(err)
-		return Error{Code: CodeServerSaveError3, Message: "Save err"}
+	if err := conn.QueryRowContext(ctx, "SELECT ts FROM "+w.getTableByClient(bid.Client)+" WHERE id = ? LIMIT 1", l).Scan(&ts); err != nil {
+		w.log.Println("ERR:GetRow")
+		w.log.Println(err)
+		return Error{Code: CodeServerSaveError3, Message: "Add err"}
 	}
 
-	t, e := time.ParseInLocation("2006-01-02 15:04:05.000000", ts, d.loc)
+	t, e := time.ParseInLocation("2006-01-02 15:04:05.000000", ts, w.loc)
 	if e != nil {
-		d.log.Println(e)
-		return Error{Code: CodeServerSaveError4, Message: "Save err"}
+		w.log.Println(e)
+		return Error{Code: CodeServerSaveError4, Message: "Add err"}
 	}
 
 	// set process time
@@ -296,25 +296,25 @@ func (d *MysqlWarehouse) Save(bid *Bid) error {
 	return nil
 }
 
-func (d *MysqlWarehouse) FinalSave(bid *Bid) error {
-	_, e := d.db.Exec("INSERT INTO "+d.getTableResult()+" (client, price, sequence, ts) VALUES (?, ?, ?, ?)", bid.Client, bid.Price, bid.Sequence, bid.Time.Format("2006-01-02 15:04:05.000000"))
+func (w *MysqlWarehouse) Commit(bid *Bid) error {
+	_, e := w.db.Exec("INSERT INTO "+w.getTableResult()+" (client, price, sequence, ts) VALUES (?, ?, ?, ?)", bid.Client, bid.Price, bid.Sequence, bid.Time.Format("2006-01-02 15:04:05.000000"))
 	if e != nil {
-		d.log.Println("ERR:INSERT INTO")
-		d.log.Println(e)
-		return Error{Code: CodeServerSaveError5, Message: "FinalSave err"}
+		w.log.Println("ERR:INSERT INTO")
+		w.log.Println(e)
+		return Error{Code: CodeServerSaveError5, Message: "Commit err"}
 	}
 
 	return nil
 }
 
-func (d *MysqlWarehouse) DumpToStore(store *Store, c *Config) {
+func (w *MysqlWarehouse) Restore(store *Store, c *Config) {
 	pageSize := 1000
 
 	for t := 0; t < TableShards; t++ {
 		id := 0
 		for {
 			curI := 0
-			rows, err := d.db.Query("SELECT id,client,price,sequence,ts FROM "+d.table+fmt.Sprintf("%04d", t)+" WHERE id > ? ORDER BY id ASC LIMIT "+strconv.Itoa(pageSize), id)
+			rows, err := w.db.Query("SELECT id,client,price,sequence,ts FROM "+w.table+fmt.Sprintf("%04d", t)+" WHERE id > ? ORDER BY id ASC LIMIT "+strconv.Itoa(pageSize), id)
 			for rows.Next() {
 				bid := &Bid{Active: true}
 				var ts string
@@ -322,7 +322,7 @@ func (d *MysqlWarehouse) DumpToStore(store *Store, c *Config) {
 				if err != nil {
 					log.Fatal(err)
 				}
-				t, e := time.ParseInLocation("2006-01-02 15:04:05.000000", ts, d.loc)
+				t, e := time.ParseInLocation("2006-01-02 15:04:05.000000", ts, w.loc)
 				if e != nil {
 					log.Fatal(err)
 				}
@@ -349,10 +349,10 @@ func (d *MysqlWarehouse) DumpToStore(store *Store, c *Config) {
 	}
 }
 
-func (d *MysqlWarehouse) getTableByClient(client int) string {
-	return d.table + fmt.Sprintf("%04d", client&(TableShards-1))
+func (w *MysqlWarehouse) getTableByClient(client int) string {
+	return w.table + fmt.Sprintf("%04d", client&(TableShards-1))
 }
 
-func (d *MysqlWarehouse) getTableResult() string {
-	return d.table + "f"
+func (w *MysqlWarehouse) getTableResult() string {
+	return w.table + "f"
 }
