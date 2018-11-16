@@ -15,9 +15,16 @@ import (
 	_ "github.com/lib/pq"
 )
 
-const Threshold = 10000
+const BidProcessThreshold = 10000
 const PricingDelta = 3
 const BidsPerBidder = 3
+
+const (
+	SessionUnprepared = iota
+	SessionFirstHalf
+	SessionSecondHalf
+	SessionFinished
+)
 
 // Exchange hold a exchange instance for bid,
 // including time period control, system log
@@ -29,8 +36,8 @@ type Exchange struct {
 	state  *State // runtime status, collect per second
 
 	// state
-	session  int // 0 before start, 1 first half, 2 second half, 3 end
-	verified int // dump all data and verify
+	session int  // 0 before start, 1 first half, 2 second half, 3 end
+	sealed  bool // finish dump all data and verify
 
 	serial      uint64 // serial number for each Bid, atomic increasing
 	lowestPrice int
@@ -38,13 +45,12 @@ type Exchange struct {
 	bidders     int // total bidders
 
 	// timer & locker
-	startTimer      *time.Timer
-	halfTimer       *time.Timer
-	endTimer        *time.Timer
-	stateTicker     *time.Ticker
-	quitStateTicker chan struct{}
-	updateLock      sync.Mutex // update state lock
-	conLock         chan bool  // concurrency lock channel
+	startTimer          *time.Timer
+	halfTimer           *time.Timer
+	endTimer            *time.Timer
+	stateTicker         *time.Ticker
+	quitStateTickerSign chan struct{}
+	bidConcurrentLock   chan struct{} // concurrency lock channel
 
 	// storage
 	store     *Store
@@ -63,12 +69,12 @@ type Exchange struct {
 }
 
 type Config struct {
-	StartTime time.Time `json:"startTime"`
-	HalfTime  time.Time `json:"halfTime"`
-	EndTime   time.Time `json:"endTime"`
+	StartTime time.Time
+	HalfTime  time.Time
+	EndTime   time.Time
 
-	Capacity     int `json:"capacity"`
-	WarningPrice int `json:"warningPrice"` // warning price of first half, 0 for disable
+	Capacity     int
+	WarningPrice int // warning price of first half, 0 for disable
 }
 
 type State struct {
@@ -140,7 +146,7 @@ func NewExchange(conf Config) *Exchange {
 
 // Serve start to serve incoming request
 func (e *Exchange) Serve() {
-	e.session = 0
+	e.session = SessionUnprepared
 
 	e.lowestPrice = 1
 	e.lowestTime = e.config.StartTime
@@ -149,8 +155,8 @@ func (e *Exchange) Serve() {
 	e.collectStat()
 
 	// runtime state
-	e.conLock = make(chan bool, Threshold)
-	e.quitStateTicker = make(chan struct{})
+	e.bidConcurrentLock = make(chan struct{}, BidProcessThreshold)
+	e.quitStateTickerSign = make(chan struct{})
 
 	// add clock
 	now := time.Now()
@@ -166,26 +172,26 @@ func (e *Exchange) Serve() {
 	e.counterReq = newCounter()
 }
 
-// Shutdown stop all service gracefully (save & exit)
-func (e *Exchange) Shutdown() {
+// Close stop all service gracefully (save & exit)
+func (e *Exchange) Close() {
 	e.stopTimer()
 
-	if e.verified == 0 {
-		e.Verify()
+	if !e.sealed {
+		e.Seal()
 	}
 
 	e.releaseResource()
 }
 
-// Close stop all service right now (exit)
-func (e *Exchange) Close() {
+// Halt stop all service right now (exit)
+func (e *Exchange) Halt() {
 	e.stopTimer()
 	e.releaseResource()
 }
 
 func (e *Exchange) stopTimer() {
 	if e.stateTicker != nil {
-		close(e.quitStateTicker)
+		e.quitStateTickerSign <- struct{}{}
 	}
 	if e.startTimer != nil {
 		e.startTimer.Stop()
@@ -204,31 +210,33 @@ func (e *Exchange) releaseResource() {
 	}
 }
 
-// Verify check all data correct
-// it should be called before Shutdown
-func (e *Exchange) Verify() {
+// Seal check all data correct and judge final result
+func (e *Exchange) Seal() {
 	e.sysLog.Println("===============================")
-	e.sysLog.Printf(">>> Start Verify @ %s", time.Now().Format("15:04:05.000000"))
+	e.sysLog.Printf(">>> Start Sealing @ %s", time.Now().Format("15:04:05.000000"))
 	e.sysLog.Println("===============================")
 
-	// protect duplicate dump
-	if e.verified > 0 {
+	// avoid duplicate dump
+	if e.sealed {
 		return
 	}
-	e.verified++
+	e.sealed = true
 
-	whStore := NewStore(0)
-	e.warehouse.Restore(whStore, e.config)
-	if !e.store.Equal(whStore) {
-		// ERROR
+	// compare store in memory with store restored from warehouse
+	// make all data correct
+	restoreStore := NewStore(0)
+	e.warehouse.Restore(restoreStore, e.config)
+	if !e.store.Equal(restoreStore) {
+		// fatal error
 	}
 
-	whStore.SetCapacity(e.config.Capacity)
-	whStore.SortAllBlocks()
+	restoreStore.SetCapacity(e.config.Capacity)
+	restoreStore.SortAllBlocks()
 
 	// export final result
-	e.Dump()
-	e.Output()
+	e.store.Judge()
+	e.commitResults()
+	e.dump()
 
 	// bid stats
 	//e.counterReq.Lock()
@@ -243,7 +251,7 @@ func (e *Exchange) Verify() {
 	//e.counterReq.Unlock()
 
 	e.sysLog.Println("===============================")
-	e.sysLog.Printf(">>> End Verify @ %s", time.Now().Format("15:04:05.000000"))
+	e.sysLog.Printf(">>> End Sealing @ %s", time.Now().Format("15:04:05.000000"))
 	e.sysLog.Println("===============================")
 
 	// log memory use
@@ -252,13 +260,19 @@ func (e *Exchange) Verify() {
 	e.sysLog.Printf(">>> Memory Alloc %d, TotalAlloc %d, HeapAlloc %d, HeapSys %d", mem.Alloc, mem.TotalAlloc, mem.HeapAlloc, mem.HeapSys)
 }
 
-func (e *Exchange) BidderStatus(client int) (*Bid, error) {
+// Enquiry enquiries bidder's latest Bid
+func (e *Exchange) Enquiry(client int) (*Bid, error) {
 	bidder := e.store.GetBidderBlock(client)
 	if bidder != nil {
 		return bidder.Bids[len(bidder.Bids)-1], nil
 	}
 
 	return nil, Error{Code: CodeRequestNotAttend, Message: "Not attend"}
+}
+
+// SuccessfulBids list all successful bids
+func (e *Exchange) SuccessfulBids() []*Bid {
+	return e.store.FinalBids
 }
 
 func (e *Exchange) Config() *Config {
@@ -277,28 +291,8 @@ func (e *Exchange) BidsCount() int {
 	return e.store.CountBids()
 }
 
-func (e *Exchange) BeforeStart() bool {
-	return e.session == 0
-}
-
-func (e *Exchange) AfterEnd() bool {
-	return e.session == 3
-}
-
-func (e *Exchange) IsSession() bool {
-	return e.session == 1 || e.session == 2
-}
-
-func (e *Exchange) IsSession1() bool {
-	return e.session == 1
-}
-
-func (e *Exchange) IsSession2() bool {
-	return e.session == 2
-}
-
 func (e *Exchange) toggleStart() {
-	e.session++
+	e.session = SessionFirstHalf
 	e.sysLog.Println("===============================")
 	e.sysLog.Printf(">>> Session %d @ %s", e.session, time.Now().Format("15:04:05.000000"))
 	e.sysLog.Println("===============================")
@@ -307,7 +301,7 @@ func (e *Exchange) toggleStart() {
 }
 
 func (e *Exchange) toggleHalf() {
-	e.session++
+	e.session = SessionSecondHalf
 	e.sysLog.Println("===============================")
 	e.sysLog.Printf(">>> Session %d @ %s", e.session, time.Now().Format("15:04:05.000000"))
 	e.sysLog.Println("===============================")
@@ -317,13 +311,13 @@ func (e *Exchange) toggleHalf() {
 }
 
 func (e *Exchange) toggleEnd() {
-	e.session++
+	e.session = SessionFinished
 	e.sysLog.Println("===============================")
 	e.sysLog.Printf(">>> Session %d @ %s", e.session, time.Now().Format("15:04:05.000000"))
 	e.sysLog.Println("===============================")
 
 	if e.stateTicker != nil {
-		close(e.quitStateTicker)
+		e.quitStateTickerSign <- struct{}{}
 	}
 
 	// collect stat last time
@@ -363,29 +357,29 @@ func (e *Exchange) Bid(bid *Bid) error {
 	return err
 }
 
+// traffic control
 func (e *Exchange) bid(bid *Bid) error {
 	if !bid.Time.IsZero() || bid.Sequence != 0 || bid.Active {
 		return Error{Code: CodeRequestInvalid, Message: "Invalid request"}
 	}
 
-	if !e.IsSession() {
-		if e.BeforeStart() {
-			return Error{Code: CodeServerNotReady, Message: "Not ready"}
-		} else {
-			return Error{Code: CodeServerEnd, Message: "Invalid time"}
-		}
+	if e.session == SessionUnprepared {
+		return Error{Code: CodeServerNotReady, Message: "Not ready"}
+	} else if e.session == SessionFinished {
+		return Error{Code: CodeServerEnd, Message: "Invalid time"}
 	}
 
 	// concurrency lock
-	e.conLock <- true
+	e.bidConcurrentLock <- struct{}{}
 
 	err := e.bidProcess(bid)
 	// concurrency release
-	<-e.conLock
+	<-e.bidConcurrentLock
 
 	return err
 }
 
+// actually bid process
 func (e *Exchange) bidProcess(bid *Bid) error {
 	if bid.Price < 1 {
 		return Error{Code: CodeRequestInvalidPrice, Message: "Invalid price"}
@@ -394,9 +388,9 @@ func (e *Exchange) bidProcess(bid *Bid) error {
 	bid.Active = true
 
 	var err error
-	if e.IsSession1() {
+	if e.session == SessionFirstHalf {
 		err = e.bidSession1(bid)
-	} else if e.IsSession2() {
+	} else if e.session == SessionSecondHalf {
 		err = e.bidSession2(bid)
 	} else {
 		bid.Active = false
@@ -484,15 +478,14 @@ func (e *Exchange) bidSession2(bid *Bid) error {
 
 // startCollector start a time.Ticker to collect system state per second
 func (e *Exchange) startCollector() {
+	e.collectStat()
+
 	e.stateTicker = time.NewTicker(time.Second * 1)
-	//for ; true; <-e.stateTicker.C {
-	//	e.collectStat()
-	//}
 	for {
 		select {
 		case <-e.stateTicker.C:
 			e.collectStat()
-		case <-e.quitStateTicker:
+		case <-e.quitStateTickerSign:
 			// release resources avoid memory leak
 			e.stateTicker.Stop()
 			e.stateTicker = nil
@@ -502,7 +495,7 @@ func (e *Exchange) startCollector() {
 }
 
 func (e *Exchange) collectStat() {
-	if e.IsSession1() {
+	if e.session == SessionFirstHalf {
 		e.collectCountBidders()
 	}
 
@@ -520,20 +513,13 @@ func (e *Exchange) collectCountBidders() {
 }
 
 // Dump save all final result to log
-func (e *Exchange) Dump() {
+func (e *Exchange) dump() {
 	DumpAll(e.resLog, e.store)
 }
 
-// Output save final tender to storage
-func (e *Exchange) Output() {
-	success := 0
-	for _, key := range e.store.PriceChain.Index {
-		b := e.store.PriceChain.Blocks[key]
-		for _, bid := range b.Bids {
-			if success < e.store.Capacity && bid.Active {
-				e.warehouse.Commit(bid)
-				success++
-			}
-		}
+// save final tender to storage
+func (e *Exchange) commitResults() {
+	for _, bid := range e.store.FinalBids {
+		e.warehouse.Commit(bid)
 	}
 }

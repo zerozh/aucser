@@ -123,7 +123,7 @@ func systemHandle(w http.ResponseWriter, r *http.Request) {
 	log.Println("===============================")
 
 	if exchange != nil {
-		exchange.Close()
+		exchange.Halt()
 	}
 
 	conf := auccore.Config{

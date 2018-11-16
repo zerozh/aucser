@@ -36,6 +36,7 @@ type Store struct {
 	sync.RWMutex
 	BidderChain         *Chain
 	PriceChain          *Chain
+	FinalBids           []*Bid
 	Capacity            int
 	LowestTenderableBid *Bid
 }
@@ -52,7 +53,7 @@ func NewStore(capacity int) *Store {
 
 func NewChain() *Chain {
 	return &Chain{
-		Blocks: map[int]*Block{},
+		Blocks: make(map[int]*Block),
 	}
 }
 
@@ -120,7 +121,8 @@ func (s *Store) SortAllBlocks() {
 }
 
 // updateState update the lowest bid
-// may inaccurate due to bids in block is NOT in order by difference of the time in db and inserting to list
+// may inaccurate due to bids in block is NOT in order
+// it is different between the time in warehouse and inserting to store
 func (s *Store) updateState() {
 	// no Capacity, do not update lowest bid
 	if s.Capacity == 0 {
@@ -177,6 +179,27 @@ func (s *Store) Equal(*Store) bool {
 	return true
 }
 
+// Judge final result
+func (s *Store) Judge() bool {
+	if s.Capacity <= 0 {
+		return false
+	}
+
+	s.Lock()
+	success := 0
+	for _, key := range s.PriceChain.Index {
+		b := s.PriceChain.Blocks[key]
+		for _, bid := range b.Bids {
+			if success < s.Capacity && bid.Active {
+				s.FinalBids = append(s.FinalBids, bid)
+				success++
+			}
+		}
+	}
+	s.Unlock()
+	return true
+}
+
 // Insert insert *Bid to specific *Block
 // if sortIndex apply, eg, insert the bid to a Chain of PriceChain, also sort the Block.Index
 func (c *Chain) Insert(key int, bid *Bid, sortIndex bool) {
@@ -197,14 +220,12 @@ func (c *Chain) insert(key int, bid *Bid) {
 }
 
 func (c *Chain) initBlock(key int, sortIndex bool) bool {
-	b := c.Blocks[key]
-	if b == nil {
+	if b := c.Blocks[key]; b == nil {
 		c.Blocks[key] = &Block{Key: key}
 		c.Index = append(c.Index, key)
 		if sortIndex {
 			sort.Sort(sort.Reverse(sort.IntSlice(c.Index)))
 		}
-
 		return true
 	} else {
 		return false
@@ -215,18 +236,14 @@ func (c *Chain) initBlock(key int, sortIndex bool) bool {
 func (c *Chain) SortBlock(key int) bool {
 	c.Lock()
 	defer c.Unlock()
-
 	return c.sortBlock(key)
 }
 
 func (c *Chain) sortBlock(key int) bool {
-	b := c.Blocks[key]
-
-	if b == nil {
+	if b := c.Blocks[key]; b == nil {
 		return false
 	} else {
 		sort.SliceStable(b.Bids, func(i, j int) bool { return b.Bids[i].Time.Before(b.Bids[j].Time) })
-
 		return true
 	}
 }
@@ -235,7 +252,6 @@ func (c *Chain) sortBlock(key int) bool {
 func (c *Chain) GetBlock(key int) *Block {
 	c.RLock()
 	defer c.RUnlock()
-
 	return c.getBlock(key)
 }
 
@@ -259,7 +275,6 @@ func (c *Chain) decrActiveCount(key int) {
 func (c *Chain) Length() int {
 	c.RLock()
 	defer c.RUnlock()
-
 	return c.length()
 }
 
@@ -271,7 +286,6 @@ func (c *Chain) length() int {
 func (c *Chain) Sum() int {
 	c.RLock()
 	defer c.RUnlock()
-
 	return c.sum()
 }
 
@@ -280,6 +294,5 @@ func (c *Chain) sum() int {
 	for _, b := range c.Blocks {
 		r += b.Total
 	}
-
 	return int(r)
 }
