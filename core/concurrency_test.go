@@ -21,7 +21,7 @@ func TestConcurrency(t *testing.T) {
 	var counterDone uint64
 
 	for i := 0; i < 230000; i++ {
-		ts := time.Duration(generateRequest(60) * 1000000000)
+		ts := time.Duration(generateRequest(60) * 1e9)
 		wg.Add(1)
 		time.AfterFunc(ts, func() {
 			defer wg.Done()
@@ -65,7 +65,7 @@ func TestConcurrency(t *testing.T) {
 		return keys[i] < keys[j]
 	})
 	for _, k := range keys {
-		fmt.Printf("%d T %6d AllAvgTime %02.3f\n", k, allMap[k], float64(allTimeMap[k])/1000000000/float64(allMap[k]))
+		fmt.Printf("%d T %6d AllAvgTime %02.3f\n", k, allMap[k], float64(allTimeMap[k])/1e9/float64(allMap[k]))
 	}
 }
 
