@@ -164,12 +164,30 @@ func (e *Exchange) Serve() {
 	if now.Before(e.config.StartTime) {
 		tStartDuration = e.config.StartTime.Sub(now)
 	}
-	e.startTimer = time.AfterFunc(tStartDuration, e.toggleStart)
-	e.halfTimer = time.AfterFunc(e.config.HalfTime.Sub(now), e.toggleHalf)
-	e.endTimer = time.AfterFunc(e.config.EndTime.Sub(now), e.toggleEnd)
+	e.startTimer = time.NewTimer(tStartDuration)
+	e.halfTimer = time.NewTimer(e.config.HalfTime.Sub(now))
+	e.endTimer = time.NewTimer(e.config.EndTime.Sub(now))
 
 	// init counter
 	e.counterReq = newCounter()
+
+	for {
+		select {
+		case <-e.startTimer.C:
+			e.session = SessionFirstHalf
+			//e.toggleStart()
+			go e.startCollector()
+		case <-e.halfTimer.C:
+			e.session = SessionSecondHalf
+			//e.toggleHalf()
+			e.collectCountBidders()
+		case <-e.endTimer.C:
+			e.session = SessionFinished
+			//e.toggleEnd()
+			e.stopCollector()
+			return
+		}
+	}
 }
 
 // Close stop all service gracefully (save & exit)
@@ -185,14 +203,15 @@ func (e *Exchange) Close() {
 
 // Halt stop all service right now (exit)
 func (e *Exchange) Halt() {
+	// todo how to halt by signal chan
+	if e.endTimer != nil {
+		e.endTimer.Reset(time.Nanosecond)
+	}
 	e.stopTimer()
 	e.releaseResource()
 }
 
 func (e *Exchange) stopTimer() {
-	if e.stateTicker != nil {
-		e.quitStateTickerSign <- struct{}{}
-	}
 	if e.startTimer != nil {
 		e.startTimer.Stop()
 	}
@@ -289,39 +308,6 @@ func (e *Exchange) BiddersCount() int {
 
 func (e *Exchange) BidsCount() int {
 	return e.store.CountBids()
-}
-
-func (e *Exchange) toggleStart() {
-	e.session = SessionFirstHalf
-	e.sysLog.Println("===============================")
-	e.sysLog.Printf(">>> Session %d @ %s", e.session, time.Now().Format("15:04:05.000000"))
-	e.sysLog.Println("===============================")
-
-	go e.startCollector()
-}
-
-func (e *Exchange) toggleHalf() {
-	e.session = SessionSecondHalf
-	e.sysLog.Println("===============================")
-	e.sysLog.Printf(">>> Session %d @ %s", e.session, time.Now().Format("15:04:05.000000"))
-	e.sysLog.Println("===============================")
-
-	// count bidders last time
-	e.collectCountBidders()
-}
-
-func (e *Exchange) toggleEnd() {
-	e.session = SessionFinished
-	e.sysLog.Println("===============================")
-	e.sysLog.Printf(">>> Session %d @ %s", e.session, time.Now().Format("15:04:05.000000"))
-	e.sysLog.Println("===============================")
-
-	if e.stateTicker != nil {
-		e.quitStateTickerSign <- struct{}{}
-	}
-
-	// collect stat last time
-	e.collectStat()
 }
 
 func (e *Exchange) incrRequestCount() {
@@ -476,6 +462,24 @@ func (e *Exchange) bidSession2(bid *Bid) error {
 	return nil
 }
 
+func (e *Exchange) toggleStart() {
+	e.sysLog.Println("===============================")
+	e.sysLog.Printf(">>> Session %d @ %s", e.session, time.Now().Format("15:04:05.000000"))
+	e.sysLog.Println("===============================")
+}
+
+func (e *Exchange) toggleHalf() {
+	e.sysLog.Println("===============================")
+	e.sysLog.Printf(">>> Session %d @ %s", e.session, time.Now().Format("15:04:05.000000"))
+	e.sysLog.Println("===============================")
+}
+
+func (e *Exchange) toggleEnd() {
+	e.sysLog.Println("===============================")
+	e.sysLog.Printf(">>> Session %d @ %s", e.session, time.Now().Format("15:04:05.000000"))
+	e.sysLog.Println("===============================")
+}
+
 // startCollector start a time.Ticker to collect system state per second
 func (e *Exchange) startCollector() {
 	e.collectStat()
@@ -492,6 +496,14 @@ func (e *Exchange) startCollector() {
 			return
 		}
 	}
+}
+
+func (e *Exchange) stopCollector() {
+	if e.stateTicker != nil {
+		e.quitStateTickerSign <- struct{}{}
+	}
+
+	e.collectStat()
 }
 
 func (e *Exchange) collectStat() {
@@ -514,7 +526,7 @@ func (e *Exchange) collectCountBidders() {
 
 // Dump save all final result to log
 func (e *Exchange) dump() {
-	DumpAll(e.resLog, e.store)
+	//DumpAll(e.resLog, e.store)
 }
 
 // save final tender to storage
