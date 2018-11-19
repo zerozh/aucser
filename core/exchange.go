@@ -49,6 +49,7 @@ type Exchange struct {
 	halfTimer           *time.Timer
 	endTimer            *time.Timer
 	stateTicker         *time.Ticker
+	quitServe           chan struct{}
 	quitStateTickerSign chan struct{}
 	bidConcurrentLock   chan struct{} // concurrency lock channel
 
@@ -146,8 +147,6 @@ func NewExchange(conf Config) *Exchange {
 
 // Serve start to serve incoming request
 func (e *Exchange) Serve() {
-	e.session = SessionUnprepared
-
 	e.lowestPrice = 1
 	e.lowestTime = e.config.StartTime
 
@@ -157,6 +156,7 @@ func (e *Exchange) Serve() {
 	// runtime state
 	e.bidConcurrentLock = make(chan struct{}, BidProcessThreshold)
 	e.quitStateTickerSign = make(chan struct{})
+	e.quitServe = make(chan struct{})
 
 	// add clock
 	now := time.Now()
@@ -186,6 +186,11 @@ func (e *Exchange) Serve() {
 			//e.toggleEnd()
 			e.stopCollector()
 			return
+		case <-e.quitServe:
+			e.session = SessionFinished
+			//e.toggleEnd()
+			e.stopCollector()
+			return
 		}
 	}
 }
@@ -203,10 +208,7 @@ func (e *Exchange) Close() {
 
 // Halt stop all service right now (exit)
 func (e *Exchange) Halt() {
-	// todo how to halt by signal chan
-	if e.endTimer != nil {
-		e.endTimer.Reset(time.Nanosecond)
-	}
+	e.quitServe <- struct{}{}
 	e.stopTimer()
 	e.releaseResource()
 }
@@ -231,15 +233,15 @@ func (e *Exchange) releaseResource() {
 
 // Seal check all data correct and judge final result
 func (e *Exchange) Seal() {
-	e.sysLog.Println("===============================")
-	e.sysLog.Printf(">>> Start Sealing @ %s", time.Now().Format("15:04:05.000000"))
-	e.sysLog.Println("===============================")
-
-	// avoid duplicate dump
+	// avoid duplicate sealing
 	if e.sealed {
 		return
 	}
 	e.sealed = true
+
+	e.sysLog.Println("===============================")
+	e.sysLog.Printf(">>> Start Sealing @ %s", time.Now().Format("15:04:05.000000"))
+	e.sysLog.Println("===============================")
 
 	// compare store in memory with store restored from warehouse
 	// make all data correct
