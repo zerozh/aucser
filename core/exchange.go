@@ -208,8 +208,12 @@ func (e *Exchange) Close() {
 
 // Halt stop all service right now (exit)
 func (e *Exchange) Halt() {
-	e.quitServe <- struct{}{}
 	e.stopTimer()
+
+	if e.session != SessionFinished {
+		e.quitServe <- struct{}{}
+	}
+
 	e.releaseResource()
 }
 
@@ -485,8 +489,9 @@ func (e *Exchange) toggleEnd() {
 // startCollector start a time.Ticker to collect system state per second
 func (e *Exchange) startCollector() {
 	e.collectStat()
+	defer e.collectStat()
 
-	e.stateTicker = time.NewTicker(time.Second * 1)
+	e.stateTicker = time.NewTicker(time.Millisecond * 500)
 	for {
 		select {
 		case <-e.stateTicker.C:
@@ -504,8 +509,6 @@ func (e *Exchange) stopCollector() {
 	if e.stateTicker != nil {
 		e.quitStateTickerSign <- struct{}{}
 	}
-
-	e.collectStat()
 }
 
 func (e *Exchange) collectStat() {
