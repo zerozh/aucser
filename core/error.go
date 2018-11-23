@@ -28,6 +28,9 @@ const (
 	CodeServerSaveError3 = 33
 	CodeServerSaveError4 = 34
 	CodeServerSaveError5 = 35
+
+	CodeSuccessfulBid = 41
+	CodeFailBid       = 42
 )
 
 type Error struct {
