@@ -136,6 +136,7 @@ func NewExchange(conf Config) *Exchange {
 	return &Exchange{
 		uuid:      pid,
 		config:    &conf,
+		state:     &State{},
 		sysLog:    sysLogger,
 		bidLog:    bidLogger,
 		resLog:    resLogger,
@@ -147,12 +148,6 @@ func NewExchange(conf Config) *Exchange {
 
 // Serve start to serve incoming request
 func (e *Exchange) Serve() {
-	e.lowestPrice = 1
-	e.lowestTime = e.config.StartTime
-
-	e.state = &State{}
-	e.collectStat()
-
 	// runtime state
 	e.bidConcurrentLock = make(chan struct{}, BidProcessThreshold)
 	e.quitStateTickerSign = make(chan struct{})
@@ -180,6 +175,7 @@ func (e *Exchange) Serve() {
 		case <-e.halfTimer.C:
 			e.session = SessionSecondHalf
 			//e.toggleHalf()
+			e.collectLowestPrice()
 			e.collectCountBidders()
 		case <-e.endTimer.C:
 			e.session = SessionFinished
@@ -395,8 +391,12 @@ func (e *Exchange) bidProcess(bid *Bid) error {
 	}
 
 	// bid success, update LowestTenderableBid
-	e.lowestPrice = e.store.LowestTenderableBid.Price
-	e.lowestTime = e.store.LowestTenderableBid.Time
+	// only if bidders gte capacity in first half
+	// and second half
+	if e.session == SessionSecondHalf || e.BiddersCount() >= e.config.Capacity {
+		e.lowestPrice = e.store.LowestTenderableBid.Price
+		e.lowestTime = e.store.LowestTenderableBid.Time
+	}
 
 	return nil
 }
@@ -445,7 +445,7 @@ func (e *Exchange) bidSession2(bid *Bid) error {
 		}
 	}
 
-	// we should check price FIRST to avoid consumption above, but we have to qualify first
+	// check price in bound
 	if bid.Price-e.lowestPrice > PricingDelta || e.lowestPrice-bid.Price > PricingDelta {
 		return Error{Code: CodeRequestOutOfRange, Message: "Out of Range"}
 	}
@@ -523,6 +523,15 @@ func (e *Exchange) collectStat() {
 	e.state.LowestTime = e.lowestTime
 
 	e.sysLog.Printf("%s %3.0f %4d @ %s, B %6d, O %6d, G %6d, H %6d, P %6d\n", time.Now().Format("15:04:05.000000"), e.config.EndTime.Sub(time.Now()).Seconds(), e.state.LowestPrice, e.state.LowestTime.Format("15:04:05"), e.state.Bidders, e.BidsCount(), runtime.NumGoroutine(), atomic.SwapUint64(&e.counterHit, 0), atomic.SwapUint64(&e.counterProcess, 0))
+}
+
+func (e *Exchange) collectLowestPrice() {
+	if e.store.LowestTenderableBid != nil {
+		e.lowestPrice = e.store.LowestTenderableBid.Price
+		e.lowestTime = e.store.LowestTenderableBid.Time
+	} else {
+		// no one attend...
+	}
 }
 
 func (e *Exchange) collectCountBidders() {
