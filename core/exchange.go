@@ -540,7 +540,7 @@ func (e *Exchange) collectCountBidders() {
 
 // Dump save all final result to log
 func (e *Exchange) dump() {
-	//DumpAll(e.resLog, e.store)
+	DumpAll(e.resLog, e.store)
 }
 
 // save final tender to storage

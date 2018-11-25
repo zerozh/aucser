@@ -35,6 +35,11 @@ func DumpAll(log *log.Logger, st *Store) {
 	log.Println("=============================")
 	log.Println()
 
+	if st.LowestTenderableBid == nil {
+		log.Println("no st.LowestTenderableBid")
+		return
+	}
+
 	minPriceSuccess := 0
 	minPriceLastSecondAll := 0
 	minPriceLastSecondSuccess := 0
