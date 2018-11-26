@@ -25,7 +25,7 @@ type Block struct {
 
 type Chain struct {
 	sync.RWMutex
-	Index  []int // DESC order
+	Index  []int // DESC order in PriceChain
 	Blocks map[int]*Block
 }
 
@@ -103,7 +103,7 @@ func (s *Store) Add(bid *Bid) {
 	s.updateState()
 }
 
-// SortAllBlocks sort all blocks' Block.Bids in time DESC order
+// SortAllBlocks sort all blocks' Block.Bids in time ASC order
 // usually called after end
 func (s *Store) SortAllBlocks() {
 	s.Lock()
@@ -115,9 +115,9 @@ func (s *Store) SortAllBlocks() {
 
 	s.updateState()
 
-	for _, key := range s.BidderChain.Index {
-		s.BidderChain.SortBlock(key)
-	}
+	//for _, key := range s.BidderChain.Index {
+	//	s.BidderChain.SortBlock(key)
+	//}
 }
 
 // updateState update the lowest bid
@@ -174,8 +174,26 @@ func (s *Store) updateState() {
 }
 
 // Equal check two store are equal deeply
-func (s *Store) Equal(*Store) bool {
-	// TODO
+func (s *Store) Equal(c *Store) bool {
+	for _, key := range s.BidderChain.Index {
+		b := s.BidderChain.Blocks[key]
+		bc := c.BidderChain.GetBlock(key)
+		if bc == nil {
+			return false
+		}
+		if len(b.Bids) != len(bc.Bids) {
+			return false
+		}
+
+		for i, bid := range b.Bids {
+			bidC := bc.Bids[i]
+			if bid.Client != bidC.Client || bid.Price != bidC.Price ||
+				bid.Sequence != bidC.Sequence || bid.Active != bidC.Active ||
+				!bid.Time.Truncate(time.Microsecond).Equal(bidC.Time.Truncate(time.Microsecond)) {
+				return false
+			}
+		}
+	}
 	return true
 }
 
@@ -186,6 +204,8 @@ func (s *Store) Judge() bool {
 	}
 
 	s.Lock()
+	defer s.Unlock()
+
 	success := 0
 	for _, key := range s.PriceChain.Index {
 		b := s.PriceChain.Blocks[key]
@@ -196,7 +216,6 @@ func (s *Store) Judge() bool {
 			}
 		}
 	}
-	s.Unlock()
 	return true
 }
 
@@ -232,10 +251,11 @@ func (c *Chain) initBlock(key int, sortIndex bool) bool {
 	}
 }
 
-// SortBlock sort the Block.Bids in time DESC order
+// SortBlock sort the Block.Bids in time ASC order
 func (c *Chain) SortBlock(key int) bool {
 	c.Lock()
 	defer c.Unlock()
+
 	return c.sortBlock(key)
 }
 
@@ -252,6 +272,7 @@ func (c *Chain) sortBlock(key int) bool {
 func (c *Chain) GetBlock(key int) *Block {
 	c.RLock()
 	defer c.RUnlock()
+
 	return c.getBlock(key)
 }
 
@@ -275,6 +296,7 @@ func (c *Chain) decrActiveCount(key int) {
 func (c *Chain) Length() int {
 	c.RLock()
 	defer c.RUnlock()
+
 	return c.length()
 }
 
@@ -286,6 +308,7 @@ func (c *Chain) length() int {
 func (c *Chain) Sum() int {
 	c.RLock()
 	defer c.RUnlock()
+
 	return c.sum()
 }
 

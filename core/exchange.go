@@ -247,13 +247,16 @@ func (e *Exchange) Seal() {
 	// make all data correct
 	restoreStore := NewStore(0)
 	e.warehouse.Restore(restoreStore, e.config)
+	//restoreStore.SetCapacity(e.config.Capacity)
+	//restoreStore.SortAllBlocks()
 	if !e.store.Equal(restoreStore) {
-		// fatal error
+		e.sysLog.Println("!!! Store is not equal to store restored from warehouse !!!")
+	} else {
+		e.sysLog.Println("warehouse raw data check done!")
 	}
 
-	restoreStore.SetCapacity(e.config.Capacity)
-	restoreStore.SortAllBlocks()
-
+	// sort blocks in case time in store different from warehouse
+	e.store.SortAllBlocks()
 	// export final result
 	e.store.Judge()
 	e.commitResults()
@@ -491,7 +494,7 @@ func (e *Exchange) startCollector() {
 	e.collectStat()
 	defer e.collectStat()
 
-	e.stateTicker = time.NewTicker(time.Millisecond * 500)
+	e.stateTicker = time.NewTicker(time.Millisecond * 1000)
 	for {
 		select {
 		case <-e.stateTicker.C:

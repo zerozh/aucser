@@ -47,8 +47,10 @@ func (w *MemoryWarehouse) Terminate() {
 func (w *MemoryWarehouse) Add(bid *Bid) error {
 	w.simulator.Run()
 
-	bid.Time = time.Now()
-	w.store.Add(bid)
+	bid.Time = time.Now().Truncate(time.Microsecond)
+
+	bidCopy := *bid
+	w.store.Add(&bidCopy)
 
 	return nil
 }
@@ -58,7 +60,20 @@ func (w *MemoryWarehouse) Commit(bid *Bid) error {
 }
 
 func (w *MemoryWarehouse) Restore(store *Store, c *Config) {
-	*store = *w.store
+	for _, key := range w.store.BidderChain.Index {
+		b := w.store.BidderChain.Blocks[key]
+		for _, bid := range b.Bids {
+			bidCopy := *bid
+			bidCopy.Active = true
+			if bid.Sequence == 1 && bid.Time.After(c.StartTime) && bid.Time.Before(c.HalfTime) {
+				store.Add(&bidCopy)
+			} else if bid.Sequence > 1 && bid.Time.After(c.HalfTime) && bid.Time.Before(c.EndTime) {
+				store.Add(&bidCopy)
+			} else {
+				// ignore invalid bid
+			}
+		}
+	}
 }
 
 type PostgresWarehouse struct {
@@ -135,7 +150,7 @@ func (w *PostgresWarehouse) Add(bid *Bid) error {
 	}
 
 	// set process time
-	bid.Time = t
+	bid.Time = t.Truncate(time.Microsecond)
 
 	return nil
 }
@@ -170,7 +185,7 @@ func (w *PostgresWarehouse) Restore(store *Store, c *Config) {
 				if e != nil {
 					log.Fatal(err)
 				}
-				bid.Time = t
+				bid.Time = t.Truncate(time.Microsecond)
 				if bid.Sequence == 1 && bid.Time.After(c.StartTime) && bid.Time.Before(c.HalfTime) {
 					store.Add(bid)
 				} else if bid.Sequence > 1 && bid.Time.After(c.HalfTime) && bid.Time.Before(c.EndTime) {
@@ -291,7 +306,7 @@ func (w *MysqlWarehouse) Add(bid *Bid) error {
 	}
 
 	// set process time
-	bid.Time = t
+	bid.Time = t.Truncate(time.Microsecond)
 
 	return nil
 }
@@ -326,7 +341,7 @@ func (w *MysqlWarehouse) Restore(store *Store, c *Config) {
 				if e != nil {
 					log.Fatal(err)
 				}
-				bid.Time = t
+				bid.Time = t.Truncate(time.Microsecond)
 				if bid.Sequence == 1 && bid.Time.After(c.StartTime) && bid.Time.Before(c.HalfTime) {
 					store.Add(bid)
 				} else if bid.Sequence > 1 && bid.Time.After(c.HalfTime) && bid.Time.Before(c.EndTime) {
