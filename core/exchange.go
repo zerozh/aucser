@@ -295,13 +295,15 @@ func (e *Exchange) Seal() *Final {
 	runtime.ReadMemStats(&mem)
 	e.sysLog.Printf(">>> Memory Alloc %d, TotalAlloc %d, HeapAlloc %d, HeapSys %d", mem.Alloc, mem.TotalAlloc, mem.HeapAlloc, mem.HeapSys)
 
-	e.final = &Final{
-		Capacity:       e.config.Capacity,
-		Bidders:        e.state.Bidders,
-		LowestPrice:    e.store.LowestTenderableBid.Price,
-		LowestTime:     e.store.LowestTenderableBid.Time,
-		LowestSequence: seq,
-		AveragePrice:   int(avg * 100),
+	if e.store.LowestTenderableBid != nil {
+		e.final = &Final{
+			Capacity:       e.config.Capacity,
+			Bidders:        e.state.Bidders,
+			LowestPrice:    e.store.LowestTenderableBid.Price,
+			LowestTime:     e.store.LowestTenderableBid.Time,
+			LowestSequence: seq,
+			AveragePrice:   int(avg * 100),
+		}
 	}
 	return e.final
 }
