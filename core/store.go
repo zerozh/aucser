@@ -36,9 +36,9 @@ type Store struct {
 	sync.RWMutex
 	BidderChain *Chain
 	PriceChain  *Chain
-	FinalBids   []*Bid
 	Capacity    int
-	TailBid     *Bid // last one successful bid
+	TailBid     *Bid   // last one successful bid
+	FinalBids   []*Bid // all successful bids
 }
 
 // NewStore return new *Store instance
@@ -211,11 +211,12 @@ func (s *Store) Judge() (seq int, avg float64) {
 
 	success := 0
 	totalPrice := 0
+	s.FinalBids = make([]*Bid, s.Capacity)
 	for _, key := range s.PriceChain.Index {
 		b := s.PriceChain.Blocks[key]
 		for _, bid := range b.Bids {
 			if success < s.Capacity && bid.Active {
-				s.FinalBids = append(s.FinalBids, bid)
+				s.FinalBids[success] = bid
 				success++
 				totalPrice += bid.Price
 			}
