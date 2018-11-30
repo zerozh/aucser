@@ -10,11 +10,58 @@ import (
 )
 
 func DumpAll(log *log.Logger, st *Store) {
+	if st.LowestTenderableBid == nil {
+		log.Println("*** no st.LowestTenderableBid")
+		return
+	}
+
 	success := 0
 	totalPrice := 0
+	for _, key := range st.PriceChain.Index {
+		b := st.PriceChain.Blocks[key]
+		for _, bid := range b.Bids {
+			if !bid.Active {
+			} else if success < st.Capacity {
+				success++
+				totalPrice += bid.Price
+			} else {
+			}
+		}
+	}
+
+	minPriceSuccess := 0
+	minPriceLastSecondAll := 0
+	minPriceLastSecondSuccess := 0
+	b := st.PriceChain.Blocks[st.LowestTenderableBid.Price] // min price block
+	for _, bid := range b.Bids {
+		if bid.Time.Before(st.LowestTenderableBid.Time) || bid == st.LowestTenderableBid {
+			minPriceSuccess++
+			// success
+		}
+
+		if bid.Time.Unix() == st.LowestTenderableBid.Time.Unix() {
+			minPriceLastSecondAll++
+
+			if bid.Time.Before(st.LowestTenderableBid.Time) || bid == st.LowestTenderableBid {
+				minPriceLastSecondSuccess++ // success
+			}
+		}
+	}
+
+	log.Println("=============================")
+	log.Printf("AVG PRICE %.2f\n", float64(totalPrice)/float64(success))
+	log.Printf("MIN PRICE %d\n", st.LowestTenderableBid.Price)
+	log.Printf("LOWEST TENDER %d @ %s No. %d\n", st.LowestTenderableBid.Price, st.LowestTenderableBid.Time.Format("15:04:05"), minPriceLastSecondSuccess)
+	log.Printf("MIN PRICE BIDS %d\n", st.PriceChain.Blocks[st.LowestTenderableBid.Price].Valid)
+	log.Printf("MIN PRICE DEALS %d\n", minPriceSuccess)
+	log.Printf("MIN PRICE LAST SECOND BIDS %d\n", minPriceLastSecondAll)
+	log.Printf("MIN PRICE LAST SECOND DEALS %d\n", minPriceLastSecondSuccess)
+	log.Println("=============================")
+
 	log.Println()
 	log.Println("=============Dump=============")
-
+	success = 0
+	totalPrice = 0
 	for _, key := range st.PriceChain.Index {
 		b := st.PriceChain.Blocks[key]
 		log.Printf("====Batch  %4d %6d %6d====\n", b.Key, b.Total, b.Valid)
@@ -34,40 +81,6 @@ func DumpAll(log *log.Logger, st *Store) {
 	}
 	log.Println("=============================")
 	log.Println()
-
-	if st.LowestTenderableBid == nil {
-		log.Println("no st.LowestTenderableBid")
-		return
-	}
-
-	minPriceSuccess := 0
-	minPriceLastSecondAll := 0
-	minPriceLastSecondSuccess := 0
-	for _, b := range st.PriceChain.Blocks[st.LowestTenderableBid.Price].Bids {
-		if b.Time.Before(st.LowestTenderableBid.Time) || b == st.LowestTenderableBid {
-			minPriceSuccess++
-			// success
-		}
-
-		if b.Time.Unix() == st.LowestTenderableBid.Time.Unix() {
-			minPriceLastSecondAll++
-
-			if b.Time.Before(st.LowestTenderableBid.Time) || b == st.LowestTenderableBid {
-				minPriceLastSecondSuccess++
-				// success
-			}
-		}
-	}
-
-	log.Println("=============================")
-	log.Printf("AVG PRICE %.2f\n", float64(totalPrice)/float64(success))
-	log.Printf("MIN PRICE %d\n", st.LowestTenderableBid.Price)
-	log.Printf("LOWEST TENDER @ %s No. %d\n", st.LowestTenderableBid.Time.Format("15:04:05"), minPriceLastSecondSuccess)
-	log.Printf("MIN PRICE BIDS %d\n", st.PriceChain.Blocks[st.LowestTenderableBid.Price].Valid)
-	log.Printf("MIN PRICE DEALS %d\n", minPriceSuccess)
-	log.Printf("MIN PRICE LAST SECOND BIDS %d\n", minPriceLastSecondAll)
-	log.Printf("MIN PRICE LAST SECOND DEALS %d\n", minPriceLastSecondSuccess)
-	log.Println("=============================")
 }
 
 func RestoreStoreStatus(st *Store) {

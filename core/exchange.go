@@ -34,6 +34,7 @@ type Exchange struct {
 
 	config *Config
 	state  *State // runtime status, collect per second
+	final  *Final
 
 	// state
 	session int  // 0 before start, 1 first half, 2 second half, 3 end
@@ -85,6 +86,17 @@ type State struct {
 	LowestPrice int
 	LowestTime  time.Time
 	Bidders     int
+}
+
+type Final struct {
+	Capacity int
+	Bidders  int
+
+	LowestPrice    int
+	LowestTime     time.Time
+	LowestSequence int
+
+	AveragePrice int
 }
 
 type Counter struct {
@@ -232,10 +244,10 @@ func (e *Exchange) releaseResource() {
 }
 
 // Seal check all data correct and judge final result
-func (e *Exchange) Seal() {
+func (e *Exchange) Seal() *Final {
 	// avoid duplicate sealing
 	if e.sealed {
-		return
+		return e.final
 	}
 	e.sealed = true
 
@@ -250,7 +262,7 @@ func (e *Exchange) Seal() {
 	//restoreStore.SetCapacity(e.config.Capacity)
 	//restoreStore.SortAllBlocks()
 	if !e.store.Equal(restoreStore) {
-		e.sysLog.Println("!!! Store is not equal to store restored from warehouse !!!")
+		e.sysLog.Println("*** Store is not equal to store restored from warehouse !!!")
 	} else {
 		e.sysLog.Println("warehouse raw data check done!")
 	}
@@ -258,7 +270,7 @@ func (e *Exchange) Seal() {
 	// sort blocks in case time in store different from warehouse
 	e.store.SortAllBlocks()
 	// export final result
-	e.store.Judge()
+	seq, avg := e.store.Judge()
 	e.commitResults()
 	e.dump()
 
@@ -282,6 +294,16 @@ func (e *Exchange) Seal() {
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
 	e.sysLog.Printf(">>> Memory Alloc %d, TotalAlloc %d, HeapAlloc %d, HeapSys %d", mem.Alloc, mem.TotalAlloc, mem.HeapAlloc, mem.HeapSys)
+
+	e.final = &Final{
+		Capacity:       e.config.Capacity,
+		Bidders:        e.state.Bidders,
+		LowestPrice:    e.store.LowestTenderableBid.Price,
+		LowestTime:     e.store.LowestTenderableBid.Time,
+		LowestSequence: seq,
+		AveragePrice:   int(avg * 100),
+	}
+	return e.final
 }
 
 // Enquiry enquiries bidder's latest Bid
@@ -305,6 +327,10 @@ func (e *Exchange) Config() *Config {
 
 func (e *Exchange) State() *State {
 	return e.state
+}
+
+func (e *Exchange) Final() *Final {
+	return e.final
 }
 
 func (e *Exchange) BiddersCount() int {
@@ -432,17 +458,17 @@ func (e *Exchange) bidSession1(bid *Bid) error {
 }
 
 func (e *Exchange) bidSession2(bid *Bid) error {
-	bidder := e.store.GetBidderBlock(bid.Client)
-	if bidder == nil {
+	b := e.store.GetBidderBlock(bid.Client) // bidder's block
+	if b == nil {
 		return Error{Code: CodeRequestNotAttendFirstRound, Message: "Not attend first round"}
 	}
 
-	if bidder.Total >= BidsPerBidder {
+	if b.Total >= BidsPerBidder {
 		return Error{Code: CodeRequestAllIn, Message: "Allin"}
 	}
 
 	// compare with previous bid
-	for _, preBid := range bidder.Bids {
+	for _, preBid := range b.Bids {
 		if preBid.Price == bid.Price {
 			return Error{Code: CodeRequestSamePrice, Message: "Same price"}
 		}
@@ -454,7 +480,7 @@ func (e *Exchange) bidSession2(bid *Bid) error {
 	}
 
 	// save to warehouse
-	bid.Sequence = int(bidder.Total) + 1
+	bid.Sequence = int(b.Total) + 1
 	if err := e.warehouse.Add(bid); err != nil {
 		return err
 	}

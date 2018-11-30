@@ -198,25 +198,48 @@ func (s *Store) Equal(c *Store) bool {
 }
 
 // Judge final result
-func (s *Store) Judge() bool {
+func (s *Store) Judge() (seq int, avg float64) {
 	if s.Capacity <= 0 {
-		return false
+		return 0, 0
+	}
+	if s.LowestTenderableBid == nil {
+		return 0, 0
 	}
 
 	s.Lock()
 	defer s.Unlock()
 
 	success := 0
+	totalPrice := 0
 	for _, key := range s.PriceChain.Index {
 		b := s.PriceChain.Blocks[key]
 		for _, bid := range b.Bids {
 			if success < s.Capacity && bid.Active {
 				s.FinalBids = append(s.FinalBids, bid)
 				success++
+				totalPrice += bid.Price
 			}
 		}
 	}
-	return true
+
+	minPriceSuccess := 0
+	minPriceLastSecondAll := 0
+	minPriceLastSecondSuccess := 0
+	b := s.PriceChain.Blocks[s.LowestTenderableBid.Price] // min price block
+	for _, bid := range b.Bids {
+		if bid.Time.Before(s.LowestTenderableBid.Time) || bid == s.LowestTenderableBid {
+			minPriceSuccess++ // success
+		}
+
+		if bid.Time.Unix() == s.LowestTenderableBid.Time.Unix() {
+			minPriceLastSecondAll++
+			if bid.Time.Before(s.LowestTenderableBid.Time) || bid == s.LowestTenderableBid {
+				minPriceLastSecondSuccess++ // success
+			}
+		}
+	}
+
+	return minPriceLastSecondSuccess, float64(totalPrice) / float64(success)
 }
 
 // Insert insert *Bid to specific *Block
