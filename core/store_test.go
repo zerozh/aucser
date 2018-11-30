@@ -9,7 +9,7 @@ import (
 
 var store *Store
 var capacity = 100
-var ltBid *Bid // Lowest Tenderable Bid
+var tailBid *Bid
 
 func TestMain(m *testing.M) {
 	store = NewStore(capacity)
@@ -42,117 +42,117 @@ func TestFunctionally(t *testing.T) {
 
 	bid = newBid(1, 1, 1)
 	store.Add(bid)
-	if store.LowestTenderableBid != bid {
-		t.Error("store.LowestTenderableBid != bid")
+	if store.TailBid != bid {
+		t.Error("store.TailBid != bid")
 	}
 
 	bid = newBid(2, 1, 1)
 	store.Add(bid)
-	if store.LowestTenderableBid != bid {
-		t.Error("store.LowestTenderableBid != bid")
+	if store.TailBid != bid {
+		t.Error("store.TailBid != bid")
 	}
 
 	bid = newBid(3, 1, 1)
 	store.Add(bid)
-	if store.LowestTenderableBid != bid {
-		t.Error("store.LowestTenderableBid != bid")
+	if store.TailBid != bid {
+		t.Error("store.TailBid != bid")
 	}
 
 	bid = newBid(4, 5, 1)
 	store.Add(bid)
-	if store.LowestTenderableBid.Price != 1 {
-		t.Error("store.LowestTenderableBid.Price != 1")
+	if store.TailBid.Price != 1 {
+		t.Error("store.TailBid.Price != 1")
 	}
 
 	bid = newBid(5, 2, 1)
 	store.Add(bid)
-	if store.LowestTenderableBid.Price != 1 {
-		t.Error("store.LowestTenderableBid.Price != 1")
+	if store.TailBid.Price != 1 {
+		t.Error("store.TailBid.Price != 1")
 	}
 
 	bid = newBid(6, 3, 1)
 	store.Add(bid)
-	if store.LowestTenderableBid.Price != 2 {
-		t.Error("store.LowestTenderableBid.Price != 2")
+	if store.TailBid.Price != 2 {
+		t.Error("store.TailBid.Price != 2")
 	}
 
 	bid = newBid(7, 1, 1)
 	store.Add(bid)
-	if store.LowestTenderableBid.Price != 2 {
-		t.Error("store.LowestTenderableBid.Price != 2")
+	if store.TailBid.Price != 2 {
+		t.Error("store.TailBid.Price != 2")
 	}
 
 	bid = newBid(8, 5, 1)
 	store.Add(bid)
-	if store.LowestTenderableBid.Price != 3 {
-		t.Error("store.LowestTenderableBid.Price != 3")
+	if store.TailBid.Price != 3 {
+		t.Error("store.TailBid.Price != 3")
 	}
 
 	bid = newBid(9, 4, 1)
 	store.Add(bid)
-	if store.LowestTenderableBid.Price != 4 {
-		t.Error("store.LowestTenderableBid.Price != 4")
+	if store.TailBid.Price != 4 {
+		t.Error("store.TailBid.Price != 4")
 	}
 
 	bid = newBid(10, 5, 1)
 	store.Add(bid)
-	if store.LowestTenderableBid.Price != 5 {
-		t.Error("store.LowestTenderableBid.Price != 5")
+	if store.TailBid.Price != 5 {
+		t.Error("store.TailBid.Price != 5")
 	}
 
 	bid = newBid(10, 6, 2)
 	store.Add(bid)
-	if store.LowestTenderableBid.Price != 5 {
-		t.Error("store.LowestTenderableBid.Price != 5")
+	if store.TailBid.Price != 5 {
+		t.Error("store.TailBid.Price != 5")
 	}
 
 	bid = newBid(7, 7, 2)
 	store.Add(bid)
-	if store.LowestTenderableBid.Client != 4 {
-		t.Error("store.LowestTenderableBid.Client != 4")
+	if store.TailBid.Client != 4 {
+		t.Error("store.TailBid.Client != 4")
 	}
 
 	bid = newBid(6, 6, 2)
 	store.Add(bid)
-	if store.LowestTenderableBid.Price != 6 {
-		t.Error("store.LowestTenderableBid.Price != 6")
+	if store.TailBid.Price != 6 {
+		t.Error("store.TailBid.Price != 6")
 	}
 
 	bid = newBid(4, 8, 2)
 	store.Add(bid)
-	if store.LowestTenderableBid.Client != 10 {
-		t.Error("store.LowestTenderableBid.Client != 10")
-		t.Error(store.LowestTenderableBid)
+	if store.TailBid.Client != 10 {
+		t.Error("store.TailBid.Client != 10")
+		t.Error(store.TailBid)
 	}
 
 	bid = newBid(2, 9, 2)
 	store.Add(bid)
-	if store.LowestTenderableBid.Price != 7 {
-		t.Error("store.LowestTenderableBid.Price != 7")
+	if store.TailBid.Price != 7 {
+		t.Error("store.TailBid.Price != 7")
 	}
 
 	bid = newBid(3, 7, 2)
 	store.Add(bid)
-	if store.LowestTenderableBid.Client != 7 {
-		t.Error("store.LowestTenderableBid.Client != 7")
+	if store.TailBid.Client != 7 {
+		t.Error("store.TailBid.Client != 7")
 	}
 
 	bid = newBid(3, 8, 3)
 	store.Add(bid)
-	if store.LowestTenderableBid.Client != 3 {
-		t.Error("store.LowestTenderableBid.Client != 3")
+	if store.TailBid.Client != 3 {
+		t.Error("store.TailBid.Client != 3")
 	}
 
 	bid = newBid(10, 9, 3)
 	store.Add(bid)
-	if store.LowestTenderableBid.Price != 8 {
-		t.Error("store.LowestTenderableBid.Price != 8")
+	if store.TailBid.Price != 8 {
+		t.Error("store.TailBid.Price != 8")
 	}
 
 	bid = newBid(4, 6, 3)
 	store.Add(bid)
-	if store.LowestTenderableBid.Client != 3 {
-		t.Error("store.LowestTenderableBid.Client != 3")
+	if store.TailBid.Client != 3 {
+		t.Error("store.TailBid.Client != 3")
 	}
 }
 
@@ -169,10 +169,10 @@ func TestCapacityAddS1(t *testing.T) {
 			Active:   true,
 		}
 		store.Add(bid)
-		ltBid = bid
+		tailBid = bid
 
-		if store.LowestTenderableBid != ltBid {
-			t.Errorf("store.LowestTenderableBid != ltBid %v %v", store.LowestTenderableBid, ltBid)
+		if store.TailBid != tailBid {
+			t.Errorf("store.TailBid != tailBid %v %v", store.TailBid, tailBid)
 		}
 	}
 
@@ -198,8 +198,8 @@ func TestCapacityAddS2(t *testing.T) {
 		}
 		store.Add(bid)
 
-		if store.LowestTenderableBid.Price != 1 {
-			t.Errorf("store.LowestTenderableBid.Price != 1 %v", store.LowestTenderableBid)
+		if store.TailBid.Price != 1 {
+			t.Errorf("store.TailBid.Price != 1 %v", store.TailBid)
 		}
 	}
 
@@ -211,8 +211,8 @@ func TestCapacityAddS2(t *testing.T) {
 		Active:   true,
 	}
 	store.Add(bid)
-	if store.LowestTenderableBid.Price != 2 {
-		t.Errorf("store.LowestTenderableBid.Price != 2 %v", store.LowestTenderableBid)
+	if store.TailBid.Price != 2 {
+		t.Errorf("store.TailBid.Price != 2 %v", store.TailBid)
 	}
 }
 

@@ -5,4 +5,3 @@ More detail about [Shanghai Car License Plates Auction](https://github.com/zeroz
 ## Structure
 
 * `core` main code of exchange, including bid processing and storage.
-* `server` http wrapper of `core` service

@@ -8,12 +8,12 @@ import (
 )
 
 type Bid struct {
-	Serial   int       `json:"serial"`
-	Client   int       `json:"-"`
-	Price    int       `json:"price"`
-	Time     time.Time `json:"time"`
-	Sequence int       `json:"sequence"`
-	Active   bool      `json:"-"`
+	Serial   int
+	Client   int
+	Price    int
+	Time     time.Time
+	Sequence int
+	Active   bool
 }
 
 type Block struct {
@@ -34,11 +34,11 @@ type Chain struct {
 // attach all blocks to BidderChain and PriceChain.
 type Store struct {
 	sync.RWMutex
-	BidderChain         *Chain
-	PriceChain          *Chain
-	FinalBids           []*Bid
-	Capacity            int
-	LowestTenderableBid *Bid
+	BidderChain *Chain
+	PriceChain  *Chain
+	FinalBids   []*Bid
+	Capacity    int
+	TailBid     *Bid // last one successful bid
 }
 
 // NewStore return new *Store instance
@@ -129,7 +129,7 @@ func (s *Store) updateState() {
 		return
 	}
 
-	// less or equal than capacity, use last active Bid as LowestTenderableBid
+	// less or equal than capacity, use last active Bid as TailBid
 	if s.CountBidders() <= s.Capacity {
 		for i := len(s.PriceChain.Index) - 1; i >= 0; i-- {
 			b := s.PriceChain.Blocks[s.PriceChain.Index[i]]
@@ -140,7 +140,7 @@ func (s *Store) updateState() {
 					continue
 				}
 
-				s.LowestTenderableBid = bid
+				s.TailBid = bid
 				return
 			}
 		}
@@ -165,7 +165,7 @@ func (s *Store) updateState() {
 
 				j++
 				if j == offset {
-					s.LowestTenderableBid = bid
+					s.TailBid = bid
 					return
 				}
 			}
@@ -202,7 +202,7 @@ func (s *Store) Judge() (seq int, avg float64) {
 	if s.Capacity <= 0 {
 		return 0, 0
 	}
-	if s.LowestTenderableBid == nil {
+	if s.TailBid == nil {
 		return 0, 0
 	}
 
@@ -225,15 +225,15 @@ func (s *Store) Judge() (seq int, avg float64) {
 	minPriceSuccess := 0
 	minPriceLastSecondAll := 0
 	minPriceLastSecondSuccess := 0
-	b := s.PriceChain.Blocks[s.LowestTenderableBid.Price] // min price block
+	b := s.PriceChain.Blocks[s.TailBid.Price] // min price block
 	for _, bid := range b.Bids {
-		if bid.Time.Before(s.LowestTenderableBid.Time) || bid == s.LowestTenderableBid {
+		if bid.Time.Before(s.TailBid.Time) || bid == s.TailBid {
 			minPriceSuccess++ // success
 		}
 
-		if bid.Time.Unix() == s.LowestTenderableBid.Time.Unix() {
+		if bid.Time.Unix() == s.TailBid.Time.Unix() {
 			minPriceLastSecondAll++
-			if bid.Time.Before(s.LowestTenderableBid.Time) || bid == s.LowestTenderableBid {
+			if bid.Time.Before(s.TailBid.Time) || bid == s.TailBid {
 				minPriceLastSecondSuccess++ // success
 			}
 		}

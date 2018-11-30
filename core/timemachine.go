@@ -10,8 +10,8 @@ import (
 )
 
 func DumpAll(log *log.Logger, st *Store) {
-	if st.LowestTenderableBid == nil {
-		log.Println("*** no st.LowestTenderableBid")
+	if st.TailBid == nil {
+		log.Println("*** no st.TailBid")
 		return
 	}
 
@@ -32,17 +32,17 @@ func DumpAll(log *log.Logger, st *Store) {
 	minPriceSuccess := 0
 	minPriceLastSecondAll := 0
 	minPriceLastSecondSuccess := 0
-	b := st.PriceChain.Blocks[st.LowestTenderableBid.Price] // min price block
+	b := st.PriceChain.Blocks[st.TailBid.Price] // min price block
 	for _, bid := range b.Bids {
-		if bid.Time.Before(st.LowestTenderableBid.Time) || bid == st.LowestTenderableBid {
+		if bid.Time.Before(st.TailBid.Time) || bid == st.TailBid {
 			minPriceSuccess++
 			// success
 		}
 
-		if bid.Time.Unix() == st.LowestTenderableBid.Time.Unix() {
+		if bid.Time.Unix() == st.TailBid.Time.Unix() {
 			minPriceLastSecondAll++
 
-			if bid.Time.Before(st.LowestTenderableBid.Time) || bid == st.LowestTenderableBid {
+			if bid.Time.Before(st.TailBid.Time) || bid == st.TailBid {
 				minPriceLastSecondSuccess++ // success
 			}
 		}
@@ -50,9 +50,9 @@ func DumpAll(log *log.Logger, st *Store) {
 
 	log.Println("=============================")
 	log.Printf("AVG PRICE %.2f\n", float64(totalPrice)/float64(success))
-	log.Printf("MIN PRICE %d\n", st.LowestTenderableBid.Price)
-	log.Printf("LOWEST TENDER %d @ %s No. %d\n", st.LowestTenderableBid.Price, st.LowestTenderableBid.Time.Format("15:04:05"), minPriceLastSecondSuccess)
-	log.Printf("MIN PRICE BIDS %d\n", st.PriceChain.Blocks[st.LowestTenderableBid.Price].Valid)
+	log.Printf("MIN PRICE %d\n", st.TailBid.Price)
+	log.Printf("TAIL BID %d @ %s No. %d\n", st.TailBid.Price, st.TailBid.Time.Format("15:04:05"), minPriceLastSecondSuccess)
+	log.Printf("MIN PRICE BIDS %d\n", st.PriceChain.Blocks[st.TailBid.Price].Valid)
 	log.Printf("MIN PRICE DEALS %d\n", minPriceSuccess)
 	log.Printf("MIN PRICE LAST SECOND BIDS %d\n", minPriceLastSecondAll)
 	log.Printf("MIN PRICE LAST SECOND DEALS %d\n", minPriceLastSecondSuccess)
@@ -115,14 +115,14 @@ func RestoreStoreStatus(st *Store) {
 		bid.Active = true
 		ost.Add(bid)
 		if currentT.Unix() != bid.Time.Unix() {
-			logger2.Printf("%s %4d @ %s, B %6d, O %6d, P %6d\n", bid.Time.Format("15:04:05"), ost.LowestTenderableBid.Price, ost.LowestTenderableBid.Time.Format("15:04:05"), ost.CountBidders(), ost.CountBids(), ct)
+			logger2.Printf("%s %4d @ %s, B %6d, O %6d, P %6d\n", bid.Time.Format("15:04:05"), ost.TailBid.Price, ost.TailBid.Time.Format("15:04:05"), ost.CountBidders(), ost.CountBids(), ct)
 			currentT = bid.Time
 			ct = 0
 		}
 
-		if ost.LowestTenderableBid.Price != currentP {
-			fmt.Printf("%s %4d @ %s, B %6d, O %6d, P %6d\n", bid.Time.Format("15:04:05"), ost.LowestTenderableBid.Price, ost.LowestTenderableBid.Time.Format("15:04:05"), ost.CountBidders(), ost.CountBids(), ct)
-			currentP = ost.LowestTenderableBid.Price
+		if ost.TailBid.Price != currentP {
+			fmt.Printf("%s %4d @ %s, B %6d, O %6d, P %6d\n", bid.Time.Format("15:04:05"), ost.TailBid.Price, ost.TailBid.Time.Format("15:04:05"), ost.CountBidders(), ost.CountBids(), ct)
+			currentP = ost.TailBid.Price
 		}
 
 		logger.Printf("<<< %d %4d @ %s ✔ ", bid.Client, bid.Price, bid.Time.Format("15:04:05.000"))

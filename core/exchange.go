@@ -295,12 +295,12 @@ func (e *Exchange) Seal() *Final {
 	runtime.ReadMemStats(&mem)
 	e.sysLog.Printf(">>> Memory Alloc %d, TotalAlloc %d, HeapAlloc %d, HeapSys %d", mem.Alloc, mem.TotalAlloc, mem.HeapAlloc, mem.HeapSys)
 
-	if e.store.LowestTenderableBid != nil {
+	if e.store.TailBid != nil {
 		e.final = &Final{
 			Capacity:       e.config.Capacity,
 			Bidders:        e.state.Bidders,
-			LowestPrice:    e.store.LowestTenderableBid.Price,
-			LowestTime:     e.store.LowestTenderableBid.Time,
+			LowestPrice:    e.store.TailBid.Price,
+			LowestTime:     e.store.TailBid.Time,
 			LowestSequence: seq,
 			AveragePrice:   int(avg * 100),
 		}
@@ -421,12 +421,12 @@ func (e *Exchange) bidProcess(bid *Bid) error {
 		return err
 	}
 
-	// bid success, update LowestTenderableBid
+	// bid success, update TailBid
 	// only if bidders gte capacity in first half
 	// and second half
 	if e.session == SessionSecondHalf || e.BiddersCount() >= e.config.Capacity {
-		e.lowestPrice = e.store.LowestTenderableBid.Price
-		e.lowestTime = e.store.LowestTenderableBid.Time
+		e.lowestPrice = e.store.TailBid.Price
+		e.lowestTime = e.store.TailBid.Time
 	}
 
 	return nil
@@ -557,9 +557,9 @@ func (e *Exchange) collectStat() {
 }
 
 func (e *Exchange) collectLowestPrice() {
-	if e.store.LowestTenderableBid != nil {
-		e.lowestPrice = e.store.LowestTenderableBid.Price
-		e.lowestTime = e.store.LowestTenderableBid.Time
+	if e.store.TailBid != nil {
+		e.lowestPrice = e.store.TailBid.Price
+		e.lowestTime = e.store.TailBid.Time
 	} else {
 		// no one attend...
 	}
