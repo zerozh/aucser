@@ -16,11 +16,17 @@ type Bid struct {
 	Active   bool
 }
 
+type BidNode struct {
+	next *BidNode
+	prev *BidNode
+	Bid  *Bid
+}
+
 type Block struct {
 	Key   int
 	Total uint64
 	Valid uint64
-	Bids  []*Bid
+	Root  BidNode
 }
 
 type Chain struct {
@@ -57,6 +63,14 @@ func NewChain() *Chain {
 	}
 }
 
+func NewBlock(k int) *Block {
+	b := &Block{
+		Key: k,
+	}
+	b.init()
+	return b
+}
+
 // SetCapacity set capacity manually
 // sorting and updateState may required
 func (s *Store) SetCapacity(capacity int) {
@@ -87,13 +101,13 @@ func (s *Store) Add(bid *Bid) {
 	s.Lock()
 	defer s.Unlock()
 
-	s.BidderChain.Insert(bid.Client, bid, false)
+	e := s.BidderChain.Insert(bid.Client, bid, false)
 	s.PriceChain.Insert(bid.Price, bid, true)
 
 	// decrease Block.Valid
 	b := s.BidderChain.GetBlock(bid.Client)
 	if b.Total > 1 {
-		preBid := b.Bids[b.Total-2]
+		preBid := e.prev.Bid
 		s.PriceChain.DecrActiveCount(preBid.Price)
 		preBid.Active = false
 		b.Valid = 1
@@ -137,7 +151,8 @@ func (s *Store) updateState() {
 		if c >= s.Capacity {
 			offset := s.Capacity - cPrevious
 			j := 0
-			for _, bid := range b.Bids {
+			for e := b.Front(); e != nil; e = e.Next() {
+				bid := e.Bid
 				if !bid.Active {
 					continue
 				}
@@ -164,13 +179,26 @@ func (s *Store) Equal(c *Store) bool {
 			return false
 		}
 
-		for i, bid := range b.Bids {
-			bidC := bc.Bids[i]
+		// compare linked list
+
+		eC := bc.Front()
+		if eC == nil {
+			return false
+		}
+		for e := b.Front(); e != nil; e = e.Next() {
+			bid := e.Bid
+			if eC == nil || eC.Bid == nil {
+				return false
+			}
+
+			bidC := eC.Bid
 			if bid.Client != bidC.Client || bid.Price != bidC.Price ||
 				bid.Sequence != bidC.Sequence || bid.Active != bidC.Active ||
 				!bid.Time.Truncate(time.Microsecond).Equal(bidC.Time.Truncate(time.Microsecond)) {
 				return false
 			}
+
+			eC = eC.next
 		}
 	}
 	return true
@@ -193,7 +221,8 @@ func (s *Store) Judge() (seq int, avg float64) {
 	s.FinalBids = make([]*Bid, s.Capacity)
 	for _, key := range s.PriceChain.Index {
 		b := s.PriceChain.Blocks[key]
-		for _, bid := range b.Bids {
+		for e := b.Front(); e != nil; e = e.Next() {
+			bid := e.Bid
 			if success < s.Capacity && bid.Active {
 				s.FinalBids[success] = bid
 				success++
@@ -206,7 +235,8 @@ func (s *Store) Judge() (seq int, avg float64) {
 	minPriceLastSecondAll := 0
 	minPriceLastSecondSuccess := 0
 	b := s.PriceChain.Blocks[s.TailBid.Price] // min price block
-	for _, bid := range b.Bids {
+	for e := b.Front(); e != nil; e = e.Next() {
+		bid := e.Bid
 		if bid.Time.Before(s.TailBid.Time) || bid == s.TailBid {
 			minPriceSuccess++ // success
 		}
@@ -224,26 +254,30 @@ func (s *Store) Judge() (seq int, avg float64) {
 
 // Insert insert *Bid to specific *Block
 // if sortIndex apply, eg, insert the bid to a Chain of PriceChain, also sort the Block.Index
-func (c *Chain) Insert(key int, bid *Bid, sortIndex bool) {
+func (c *Chain) Insert(key int, bid *Bid, sortIndex bool) *BidNode {
 	c.Lock()
 	defer c.Unlock()
 
 	c.initBlock(key, sortIndex)
-	c.insert(key, bid)
+	e := c.insert(key, bid)
+
+	return e
 }
 
-func (c *Chain) insert(key int, bid *Bid) {
+func (c *Chain) insert(key int, bid *Bid) *BidNode {
 	b := c.Blocks[key]
-	b.Bids = append(b.Bids, bid)
+	e := b.appendBid(bid)
 
 	// increase Block.Total and Block.Valid
 	atomic.AddUint64(&b.Total, 1)
 	atomic.AddUint64(&b.Valid, 1)
+
+	return e
 }
 
 func (c *Chain) initBlock(key int, sortIndex bool) bool {
 	if b := c.Blocks[key]; b == nil {
-		c.Blocks[key] = &Block{Key: key}
+		c.Blocks[key] = NewBlock(key)
 		c.Index = append(c.Index, key)
 		if sortIndex {
 			sort.Sort(sort.Reverse(sort.IntSlice(c.Index)))
@@ -266,7 +300,23 @@ func (c *Chain) sortBlock(key int) bool {
 	if b := c.Blocks[key]; b == nil {
 		return false
 	} else {
-		sort.SliceStable(b.Bids, func(i, j int) bool { return b.Bids[i].Time.Before(b.Bids[j].Time) })
+		// copy linked list to array for sort, then restore to linked list
+		bids := make([]*Bid, b.Total)
+		i := 0
+		for e := b.Front(); e != nil; e = e.Next() {
+			bids[i] = e.Bid
+			i++
+		}
+
+		sort.SliceStable(bids, func(i, j int) bool { return bids[i].Time.Before(bids[j].Time) })
+
+		// restore
+		i = 0
+		for e := b.Front(); e != nil; e = e.Next() {
+			e.Bid = bids[i]
+			i++
+		}
+
 		return true
 	}
 }
@@ -321,4 +371,44 @@ func (c *Chain) sum() int {
 		r += b.Total
 	}
 	return int(r)
+}
+
+func (b *Block) init() *Block {
+	b.Root.next = &b.Root
+	b.Root.prev = &b.Root
+	return b
+}
+
+func (b *Block) appendBid(bid *Bid) *BidNode {
+	e := &BidNode{Bid: bid}
+	at := b.Root.prev
+	n := at.next
+	at.next = e
+	e.prev = at
+	e.next = n
+	n.prev = e
+	return e
+}
+
+func (b *Block) Front() *BidNode {
+	if b.Total == 0 {
+		return nil
+	}
+
+	return b.Root.next
+}
+
+func (b *Block) Back() *BidNode {
+	if b.Total == 0 {
+		return nil
+	}
+
+	return b.Root.prev
+}
+
+func (n *BidNode) Next() *BidNode {
+	if p := n.next; p.Bid != nil {
+		return p
+	}
+	return nil
 }

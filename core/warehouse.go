@@ -62,7 +62,8 @@ func (w *MemoryWarehouse) Commit(bid *Bid) error {
 func (w *MemoryWarehouse) Restore(store *Store, c *Config) {
 	for _, key := range w.store.BidderChain.Index {
 		b := w.store.BidderChain.Blocks[key]
-		for _, bid := range b.Bids {
+		for e := b.Front(); e != nil; e = e.Next() {
+			bid := e.Bid
 			bidCopy := *bid
 			bidCopy.Active = true
 			if bid.Sequence == 1 && bid.Time.After(c.StartTime) && bid.Time.Before(c.HalfTime) {

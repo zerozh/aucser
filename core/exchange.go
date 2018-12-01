@@ -313,9 +313,9 @@ func (e *Exchange) Seal() *Final {
 
 // Enquiry enquiries bidder's latest Bid
 func (e *Exchange) Enquiry(client int) (*Bid, error) {
-	bidder := e.store.GetBidderBlock(client)
-	if bidder != nil {
-		return bidder.Bids[len(bidder.Bids)-1], nil
+	b := e.store.GetBidderBlock(client)
+	if b != nil {
+		return b.Back().Bid, nil
 	}
 
 	return nil, Error{Code: CodeRequestNotAttend, Message: "Not attend"}
@@ -475,8 +475,8 @@ func (e *Exchange) bidSession2(bid *Bid) error {
 	}
 
 	// compare with previous bid
-	for _, preBid := range b.Bids {
-		if preBid.Price == bid.Price {
+	for n := b.Front(); n != nil; n = n.Next() {
+		if n.Bid.Price == bid.Price {
 			return Error{Code: CodeRequestSamePrice, Message: "Same price"}
 		}
 	}

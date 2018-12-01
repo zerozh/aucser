@@ -19,7 +19,8 @@ func DumpAll(log *log.Logger, st *Store) {
 	totalPrice := 0
 	for _, key := range st.PriceChain.Index {
 		b := st.PriceChain.Blocks[key]
-		for _, bid := range b.Bids {
+		for e := b.Front(); e != nil; e = e.Next() {
+			bid := e.Bid
 			if !bid.Active {
 			} else if success < st.Capacity {
 				success++
@@ -33,7 +34,8 @@ func DumpAll(log *log.Logger, st *Store) {
 	minPriceLastSecondAll := 0
 	minPriceLastSecondSuccess := 0
 	b := st.PriceChain.Blocks[st.TailBid.Price] // min price block
-	for _, bid := range b.Bids {
+	for e := b.Front(); e != nil; e = e.Next() {
+		bid := e.Bid
 		if bid.Time.Before(st.TailBid.Time) || bid == st.TailBid {
 			minPriceSuccess++
 			// success
@@ -65,8 +67,9 @@ func DumpAll(log *log.Logger, st *Store) {
 	for _, key := range st.PriceChain.Index {
 		b := st.PriceChain.Blocks[key]
 		log.Printf("====Batch  %4d %6d %6d====\n", b.Key, b.Total, b.Valid)
-		for _, bid := range b.Bids { //  ✂ ✔ ✘
-			var mark = ""
+		for e := b.Front(); e != nil; e = e.Next() {
+			bid := e.Bid
+			var mark = "" //  ✂ ✔ ✘
 			if !bid.Active {
 				mark = "✂"
 			} else if success < st.Capacity {
@@ -96,7 +99,8 @@ func RestoreStoreStatus(st *Store) {
 
 	for _, key := range st.PriceChain.Index {
 		b := st.PriceChain.Blocks[key]
-		for _, bid := range b.Bids { //  ✂ ✔ ✘
+		for e := b.Front(); e != nil; e = e.Next() {
+			bid := e.Bid
 			bids = append(bids, bid)
 		}
 	}

@@ -61,8 +61,10 @@ func (g *Graph) Snapshot(st *Store) {
 		g.appendChain(colIdx, b)
 		//log.Printf("====Batch  %4d %6d %6d====\n", b.Key, b.Total, b.Valid)
 
-		for rowIdx, bid := range b.Bids { //  ✂ ✔ ✘
-			var mark = ""
+		rowIdx := 0
+		for e := b.Front(); e != nil; e = e.Next() {
+			bid := e.Bid
+			var mark = "" //  ✂ ✔ ✘
 			if !bid.Active {
 				mark = "✂"
 			} else if success < st.Capacity {
@@ -73,6 +75,7 @@ func (g *Graph) Snapshot(st *Store) {
 			}
 
 			g.appendBlock(colIdx, rowIdx, bid, mark)
+			rowIdx++
 			//log.Printf("%s   %d  %4d    %s\n", bid.Time.Format("15:04:05.000000"), bid.Client, bid.Price, mark)
 		}
 
