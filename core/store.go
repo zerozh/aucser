@@ -93,10 +93,9 @@ func (s *Store) Add(bid *Bid) {
 	// decrease Block.Valid
 	b := s.BidderChain.GetBlock(bid.Client)
 	if b.Total > 1 {
-		for _, preBid := range b.Bids[b.Total-2 : b.Total-1] {
-			s.PriceChain.DecrActiveCount(preBid.Price)
-			preBid.Active = false
-		}
+		preBid := b.Bids[b.Total-2]
+		s.PriceChain.DecrActiveCount(preBid.Price)
+		preBid.Active = false
 		b.Valid = 1
 	}
 
@@ -124,31 +123,11 @@ func (s *Store) SortAllBlocks() {
 // may inaccurate due to bids in block is NOT in order
 // it is different between the time in warehouse and inserting to store
 func (s *Store) updateState() {
-	// no Capacity, do not update lowest bid
-	if s.Capacity == 0 {
+	// do not update TailBid if no capacity or bidders less than capacity
+	if s.Capacity == 0 || s.CountBidders() < s.Capacity {
 		return
 	}
 
-	// less or equal than capacity, use last active Bid as TailBid
-	if s.CountBidders() <= s.Capacity {
-		for i := len(s.PriceChain.Index) - 1; i >= 0; i-- {
-			b := s.PriceChain.Blocks[s.PriceChain.Index[i]]
-			for j := len(b.Bids) - 1; j >= 0; j-- {
-				bid := b.Bids[j]
-
-				if !bid.Active {
-					continue
-				}
-
-				s.TailBid = bid
-				return
-			}
-		}
-
-		return
-	}
-
-	// greater than capacity
 	c := 0
 	for _, key := range s.PriceChain.Index {
 		cPrevious := c
@@ -181,7 +160,7 @@ func (s *Store) Equal(c *Store) bool {
 		if bc == nil {
 			return false
 		}
-		if len(b.Bids) != len(bc.Bids) {
+		if b.Total != bc.Total {
 			return false
 		}
 

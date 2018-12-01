@@ -7,25 +7,6 @@ import (
 	"time"
 )
 
-var store *Store
-var capacity = 100
-var tailBid *Bid
-
-func TestMain(m *testing.M) {
-	store = NewStore(capacity)
-
-	m.Run()
-}
-
-func TestInitStatus(t *testing.T) {
-	if store.CountBidders() != 0 {
-		t.Error("store.CountBidders() != 0")
-	}
-	if store.CountBids() != 0 {
-		t.Error("store.CountBids() != 0")
-	}
-}
-
 func newBid(client, price, seq int) *Bid {
 	return &Bid{
 		Client:   client,
@@ -40,16 +21,23 @@ func TestFunctionally(t *testing.T) {
 	var bid *Bid
 	store := NewStore(3)
 
+	if store.CountBidders() != 0 {
+		t.Error("store.CountBidders() != 0")
+	}
+	if store.CountBids() != 0 {
+		t.Error("store.CountBids() != 0")
+	}
+
 	bid = newBid(1, 1, 1)
 	store.Add(bid)
-	if store.TailBid != bid {
-		t.Error("store.TailBid != bid")
+	if store.TailBid != nil {
+		t.Error("store.TailBid != nil")
 	}
 
 	bid = newBid(2, 1, 1)
 	store.Add(bid)
-	if store.TailBid != bid {
-		t.Error("store.TailBid != bid")
+	if store.TailBid != nil {
+		t.Error("store.TailBid != nil")
 	}
 
 	bid = newBid(3, 1, 1)
@@ -153,66 +141,6 @@ func TestFunctionally(t *testing.T) {
 	store.Add(bid)
 	if store.TailBid.Client != 3 {
 		t.Error("store.TailBid.Client != 3")
-	}
-}
-
-func TestCapacityAddS1(t *testing.T) {
-	clientStart := 1
-	clientEnd := capacity
-
-	for i := clientStart; i <= clientEnd; i++ {
-		bid := &Bid{
-			Client:   i,
-			Price:    1,
-			Time:     time.Now(),
-			Sequence: 1,
-			Active:   true,
-		}
-		store.Add(bid)
-		tailBid = bid
-
-		if store.TailBid != tailBid {
-			t.Errorf("store.TailBid != tailBid %v %v", store.TailBid, tailBid)
-		}
-	}
-
-	if store.CountBidders() != clientEnd {
-		t.Error("store.CountBidders() != clientEnd")
-	}
-	if store.CountBids() != clientEnd {
-		t.Error("store.CountBids() != clientEnd")
-	}
-}
-
-func TestCapacityAddS2(t *testing.T) {
-	clientStart := 1
-	clientEnd := capacity - 1
-
-	for i := clientStart; i <= clientEnd; i++ {
-		bid := &Bid{
-			Client:   i,
-			Price:    2,
-			Time:     time.Now(),
-			Sequence: 1,
-			Active:   true,
-		}
-		store.Add(bid)
-
-		if store.TailBid.Price != 1 {
-			t.Errorf("store.TailBid.Price != 1 %v", store.TailBid)
-		}
-	}
-
-	bid := &Bid{
-		Client:   capacity,
-		Price:    2,
-		Time:     time.Now(),
-		Sequence: 1,
-		Active:   true,
-	}
-	store.Add(bid)
-	if store.TailBid.Price != 2 {
-		t.Errorf("store.TailBid.Price != 2 %v", store.TailBid)
 	}
 }
 
