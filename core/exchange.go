@@ -53,6 +53,7 @@ type Exchange struct {
 	quitServe           chan struct{}
 	quitStateTickerSign chan struct{}
 	bidConcurrentLock   chan struct{} // concurrency lock channel
+	bidWaitGroup        sync.WaitGroup
 
 	// storage
 	store     *Store
@@ -193,11 +194,13 @@ func (e *Exchange) Serve() {
 			e.session = SessionFinished
 			//e.toggleEnd()
 			e.stopCollector()
+			e.bidWaitGroup.Wait()
 			return
 		case <-e.quitServe:
 			e.session = SessionFinished
 			//e.toggleEnd()
 			e.stopCollector()
+			e.bidWaitGroup.Wait()
 			return
 		}
 	}
@@ -390,10 +393,12 @@ func (e *Exchange) bid(bid *Bid) error {
 
 	// concurrency lock
 	e.bidConcurrentLock <- struct{}{}
+	e.bidWaitGroup.Add(1)
 
 	err := e.bidProcess(bid)
 	// concurrency release
 	<-e.bidConcurrentLock
+	e.bidWaitGroup.Done()
 
 	return err
 }
