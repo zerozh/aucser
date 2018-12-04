@@ -115,12 +115,16 @@ func RestoreStoreStatus(st *Store) {
 		bid.Active = true
 		ost.Add(bid)
 		if currentT.Unix() != bid.Time.Unix() {
-			logger2.Printf("%s %4d @ %s, B %6d, O %6d, P %6d\n", bid.Time.Format("15:04:05"), ost.TailBid.Price, ost.TailBid.Time.Format("15:04:05"), ost.CountBidders(), ost.CountBids(), ct)
+			if ost.TailBid != nil {
+				logger2.Printf("%s %4d @ %s, B %6d, O %6d, P %6d\n", bid.Time.Format("15:04:05"), ost.TailBid.Price, ost.TailBid.Time.Format("15:04:05"), ost.CountBidders(), ost.CountBids(), ct)
+			} else {
+				logger2.Printf("%s - @ -, B %6d, O %6d, P %6d\n", bid.Time.Format("15:04:05"), ost.CountBidders(), ost.CountBids(), ct)
+			}
 			currentT = bid.Time
 			ct = 0
 		}
 
-		if ost.TailBid.Price != currentP {
+		if ost.TailBid != nil && ost.TailBid.Price != currentP {
 			fmt.Printf("%s %4d @ %s, B %6d, O %6d, P %6d\n", bid.Time.Format("15:04:05"), ost.TailBid.Price, ost.TailBid.Time.Format("15:04:05"), ost.CountBidders(), ost.CountBids(), ct)
 			currentP = ost.TailBid.Price
 		}
