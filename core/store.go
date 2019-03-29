@@ -207,6 +207,10 @@ func (s *Store) Judge() (seq int, avg float64) {
 	minPriceLastSecondSuccess := 0
 	b := s.PriceChain.Blocks[s.TailBid.Price] // min price block
 	for _, bid := range b.Bids {
+		if !bid.Active {
+			continue // ignore non-active bid
+		}
+
 		if bid.Time.Before(s.TailBid.Time) || bid == s.TailBid {
 			minPriceSuccess++ // success
 		}
